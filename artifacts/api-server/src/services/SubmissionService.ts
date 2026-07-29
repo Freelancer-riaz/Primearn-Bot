@@ -1,0 +1,327 @@
+import type { FirebaseApp } from "../config/firebase";
+import { SubmissionRepository } from "../repositories/SubmissionRepository";
+import type {
+  Submission,
+  SubmissionType,
+  UpdateSubmissionInput,
+} from "../models/Submission";
+import type { Category } from "../models/Category";
+import { ValidationError, NotFoundError } from "../core/errors/AppError";
+import { logger } from "../core/logger";
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+export interface CreateSubmissionRequest {
+  telegramId: number;
+  categoryId: string;
+  categoryName: string;
+  submissionType: SubmissionType;
+  fileName: string;
+  fileUrl: string;
+  /** Total rows in Column A of the uploaded file. */
+  totalIds: number;
+  /** Duplicates detected within the uploaded file (Column A). */
+  duplicateIds: number;
+  /** sourceSubmissionId is required when submissionType === "recheck". */
+  sourceSubmissionId?: string | null;
+}
+
+// ── Service ───────────────────────────────────────────────────────────────────
+
+export class SubmissionService {
+  private repo: SubmissionRepository;
+
+  constructor(app: FirebaseApp) {
+    this.repo = new SubmissionRepository(app);
+  }
+
+  // ── Public API ─────────────────────────────────────────────────────────────
+
+  /** Validate all business rules, then persist the submission. */
+  async validateAndCreate(
+    req: CreateSubmissionRequest,
+    category: Category,
+  ): Promise<Submission> {
+    this.validateRequest(req, category);
+    this.validateSubmitEnabled(category);
+    this.validateRecheckEnabled(req.submissionType, category);
+    this.validateSubmitTimeWindow(category);
+    this.validateIdCount(req.totalIds, category);
+
+    const today = this.todayUTC();
+
+    if (req.submissionType === "normal") {
+      await this.validateNoDailyDuplicate(req.telegramId, category, today);
+    } else {
+      await this.validateRecheckReference(
+        req.sourceSubmissionId,
+        req.telegramId,
+        req.categoryId,
+      );
+    }
+
+    const validIds = Math.max(0, req.totalIds - req.duplicateIds);
+
+    logger.info("Creating submission", {
+      telegramId: req.telegramId,
+      categoryId: req.categoryId,
+      type: req.submissionType,
+      totalIds: req.totalIds,
+      duplicateIds: req.duplicateIds,
+      validIds,
+    });
+
+    return this.repo.create({
+      userId: String(req.telegramId),
+      telegramId: req.telegramId,
+      categoryId: req.categoryId,
+      categoryName: category.name,
+      submissionType: req.submissionType,
+      fileName: req.fileName,
+      fileUrl: req.fileUrl,
+      totalIds: req.totalIds,
+      duplicateIds: req.duplicateIds,
+      validIds,
+      submitDate: today,
+      submitTime: this.currentTimeUTC(),
+      status: "pending",
+      reportStatus: "pending",
+      recheckEligible: false,
+      recheckUsed: false,
+      sourceSubmissionId: req.sourceSubmissionId ?? null,
+      adminNotes: null,
+    });
+  }
+
+  /** Get a submission by ID. Throws NotFoundError if missing. */
+  async getById(id: string): Promise<Submission> {
+    const sub = await this.repo.findById(id);
+    if (!sub) throw new NotFoundError(`Submission not found: ${id}`);
+    return sub;
+  }
+
+  /** Get all submissions for a user. */
+  async getByUser(telegramId: number): Promise<Submission[]> {
+    return this.repo.findByUser(telegramId);
+  }
+
+  /** Update mutable admin / status fields. */
+  async update(id: string, input: UpdateSubmissionInput): Promise<Submission> {
+    await this.getById(id); // ensures it exists
+    await this.repo.update(id, input);
+    return this.getById(id);
+  }
+
+  // ── Validation Helpers ─────────────────────────────────────────────────────
+
+  /** Validate request values before applying category business rules. */
+  private validateRequest(
+    req: CreateSubmissionRequest,
+    category: Category,
+  ): void {
+    if (!Number.isSafeInteger(req.telegramId) || req.telegramId <= 0) {
+      throw new ValidationError("A valid Telegram ID is required.");
+    }
+
+    if (req.categoryId !== category.id) {
+      throw new ValidationError("Submission category does not match.");
+    }
+
+    if (req.categoryName.trim() !== category.name.trim()) {
+      throw new ValidationError("Submission category name does not match.");
+    }
+
+    if (!req.fileName.trim()) {
+      throw new ValidationError("Submission file name is required.");
+    }
+
+    if (!req.fileUrl.trim()) {
+      throw new ValidationError("Submission file URL is required.");
+    }
+
+    if (!Number.isSafeInteger(req.totalIds) || req.totalIds < 0) {
+      throw new ValidationError("Total IDs must be a non-negative integer.");
+    }
+
+    if (
+      !Number.isSafeInteger(req.duplicateIds) ||
+      req.duplicateIds < 0 ||
+      req.duplicateIds > req.totalIds
+    ) {
+      throw new ValidationError(
+        "Duplicate IDs must be between zero and the total ID count.",
+      );
+    }
+
+    if (req.submissionType !== "normal" && req.submissionType !== "recheck") {
+      throw new ValidationError("Invalid submission type.");
+    }
+
+    if (req.submissionType === "normal" && req.sourceSubmissionId) {
+      throw new ValidationError(
+        "Normal submission cannot reference a source submission.",
+      );
+    }
+  }
+
+  /** Throws if the category has submission disabled. */
+  private validateSubmitEnabled(category: Category): void {
+    if (!category.submitEnabled) {
+      throw new ValidationError(
+        `Submissions are currently closed for "${category.name}".`,
+      );
+    }
+    if (category.status !== "active") {
+      throw new ValidationError(`Category "${category.name}" is not active.`);
+    }
+  }
+
+  /**
+   * Throws if current UTC time is outside the category's submit window.
+   * Times are "HH:MM" in 24-hour format.
+   */
+  private validateSubmitTimeWindow(category: Category): void {
+    const now = new Date();
+    const currentMins = now.getUTCHours() * 60 + now.getUTCMinutes();
+
+    const toMins = (t: string): number => {
+      if (!/^\d{2}:\d{2}$/.test(t)) return Number.NaN;
+      const [h, m] = t.split(":").map(Number);
+      if (
+        h === undefined ||
+        m === undefined ||
+        h < 0 ||
+        h > 23 ||
+        m < 0 ||
+        m > 59
+      ) {
+        return Number.NaN;
+      }
+      return h * 60 + m;
+    };
+
+    const start = toMins(category.submitStartTime);
+    const end = toMins(category.submitEndTime);
+
+    if (Number.isNaN(start) || Number.isNaN(end)) {
+      throw new ValidationError(
+        `Invalid submission window for "${category.name}".`,
+      );
+    }
+
+    const inWindow =
+      start <= end
+        ? currentMins >= start && currentMins <= end
+        : currentMins >= start || currentMins <= end;
+
+    if (!inWindow) {
+      throw new ValidationError(
+        `Submission window for "${category.name}" is ${category.submitStartTime}–${category.submitEndTime} UTC.`,
+      );
+    }
+  }
+
+  /** Throws if totalIds is outside the category's min/max range. */
+  private validateIdCount(totalIds: number, category: Category): void {
+    if (totalIds < category.minIds) {
+      throw new ValidationError(
+        `Minimum ${category.minIds} IDs required; you provided ${totalIds}.`,
+      );
+    }
+    if (totalIds > category.maxIds) {
+      throw new ValidationError(
+        `Maximum ${category.maxIds} IDs allowed; you provided ${totalIds}.`,
+      );
+    }
+  }
+
+  /**
+   * Throws if the user already has a normal submission for this category today
+   * and the category's daily limit is enabled.
+   */
+  private async validateNoDailyDuplicate(
+    telegramId: number,
+    category: Category,
+    date: string,
+  ): Promise<void> {
+    if (!category.dailyLimitEnabled) return;
+
+    const existing = await this.repo.findNormalSubmissionToday(
+      telegramId,
+      category.id,
+      date,
+    );
+
+    if (existing) {
+      throw new ValidationError(
+        `You have already submitted to "${category.name}" today. Try again tomorrow.`,
+      );
+    }
+  }
+
+  /**
+   * Throws if a recheck submission does not point to an existing submission
+   * owned by the same user. Rechecks do not participate in the normal daily
+   * submission check.
+   */
+  private async validateRecheckReference(
+    sourceSubmissionId: string | null | undefined,
+    telegramId: number,
+    categoryId: string,
+  ): Promise<void> {
+    if (!sourceSubmissionId) {
+      throw new ValidationError(
+        "Recheck submission must reference a source submission ID.",
+      );
+    }
+
+    const source = await this.repo.findById(sourceSubmissionId);
+    if (!source) {
+      throw new NotFoundError(
+        `Source submission not found: ${sourceSubmissionId}`,
+      );
+    }
+
+    if (source.telegramId !== telegramId) {
+      throw new ValidationError(
+        "Source submission does not belong to this user.",
+      );
+    }
+
+    if (source.categoryId !== categoryId) {
+      throw new ValidationError(
+        "Source submission belongs to a different category.",
+      );
+    }
+
+    if (source.submissionType !== "normal") {
+      throw new ValidationError(
+        "A recheck must reference an original normal submission.",
+      );
+    }
+  }
+
+  /** Throws if the category does not allow recheck submissions. */
+  private validateRecheckEnabled(
+    submissionType: SubmissionType,
+    category: Category,
+  ): void {
+    if (submissionType === "recheck" && !category.recheckEnabled) {
+      throw new ValidationError(
+        `Rechecks are currently closed for "${category.name}".`,
+      );
+    }
+  }
+
+  // ── Time Utilities ─────────────────────────────────────────────────────────
+
+  /** Returns today's date as "YYYY-MM-DD" in UTC. */
+  private todayUTC(): string {
+    return new Date().toISOString().slice(0, 10);
+  }
+
+  /** Returns current time as "HH:MM:SS" in UTC. */
+  private currentTimeUTC(): string {
+    return new Date().toISOString().slice(11, 19);
+  }
+}

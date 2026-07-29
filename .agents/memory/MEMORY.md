@@ -1,0 +1,1 @@
+- [Wrangler runtime](wrangler-runtime.md) — local Wrangler requires Node.js 22+, but runtime upgrade is deferred until deployment.

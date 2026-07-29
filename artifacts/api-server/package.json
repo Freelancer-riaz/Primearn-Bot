@@ -1,0 +1,22 @@
+{
+  "name": "@workspace/api-server",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --port 8080 --ip 0.0.0.0",
+    "build": "wrangler deploy --dry-run --outdir dist",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@grammyjs/conversations": "^2.0.0",
+    "grammy": "^1.36.0",
+    "hono": "^4.7.11",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260726.1",
+    "typescript": "~5.9.3",
+    "wrangler": "^4.114.0"
+  }
+}

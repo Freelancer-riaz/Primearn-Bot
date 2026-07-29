@@ -1,0 +1,21 @@
+# Local development variables for Wrangler dev.
+# Copy this file to .dev.vars and fill in your own development/test values.
+# NEVER commit .dev.vars — it contains secrets and is git-ignored.
+#
+# In production these values come from Cloudflare Worker Secrets, not this file.
+# See SETUP.md for full setup instructions.
+
+# Firebase Admin SDK service account JSON (single-line, newlines escaped as \n)
+# Generate from: Firebase Console → Project Settings → Service Accounts → Generate new private key
+# Then flatten to one line: jq -c . service-account.json
+FIREBASE_SERVICE_ACCOUNT_JSON={"type":"service_account","project_id":"YOUR_PROJECT_ID","private_key_id":"...","private_key":"-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----\n","client_email":"...@YOUR_PROJECT_ID.iam.gserviceaccount.com","client_id":"...","auth_uri":"https://accounts.google.com/o/oauth2/auth","token_uri":"https://oauth2.googleapis.com/token","auth_provider_x509_cert_url":"https://www.googleapis.com/oauth2/v1/certs","client_x509_cert_url":"..."}
+
+# Telegram bot token from @BotFather (use a separate test bot for dev)
+TELEGRAM_BOT_TOKEN=123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ
+
+# Webhook secret — a random string you set when registering the webhook with Telegram
+# Generate with: openssl rand -hex 32
+WEBHOOK_SECRET=your_random_webhook_secret_here
+
+# Optional: Maximum Excel file size in bytes (default: 10 MB = 10485760)
+SUBMISSION_MAX_FILE_SIZE_BYTES=10485760
