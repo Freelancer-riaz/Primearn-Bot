@@ -64,7 +64,7 @@ app.post("/api/webhook", handleWebhook);
 
 // ── Error & 404 ───────────────────────────────────────────────────────────────
 app.onError(errorHandler);
-app.notFound((c) => {
+app.notFound(async (c) => {
   const path = c.req.path;
 
   // API and webhook routes: keep existing JSON 404 behaviour
@@ -77,10 +77,15 @@ app.notFound((c) => {
     return c.json({ ok: false, error: "Not found" }, 404);
   }
 
-  // All other paths are SPA routes — serve index.html via Workers Assets
-  return c.env.ASSETS.fetch(
-    new Request(new URL("/index.html", c.req.url).toString()),
-  );
+  // Try to serve the real asset (JS, CSS, images, etc.) first.
+  // If Workers Assets returns 404, fall back to index.html for SPA routing.
+  const assetRes = await c.env.ASSETS.fetch(c.req.raw);
+  if (assetRes.status === 404) {
+    return c.env.ASSETS.fetch(
+      new Request(new URL("/index.html", c.req.url).toString()),
+    );
+  }
+  return assetRes;
 });
 
 export { app };
