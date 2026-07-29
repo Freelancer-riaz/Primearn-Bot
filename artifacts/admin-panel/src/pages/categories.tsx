@@ -34,6 +34,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import {
   getCategories,
@@ -52,6 +54,27 @@ const categorySchema = z.object({
   submitEnabled: z.boolean(),
   pricePerGoodId: z.coerce.number().min(0, "Must be 0 or greater"),
   displayOrder: z.coerce.number().min(0, "Must be 0 or greater"),
+
+  // Daily limit
+  dailyLimitEnabled: z.boolean(),
+  dailySubmitCount: z.coerce.number().min(0, "Must be 0 or greater"),
+
+  // Time window
+  submitStartTime: z
+    .string()
+    .regex(/^\d{2}:\d{2}$/, "Must be HH:MM format"),
+  submitEndTime: z
+    .string()
+    .regex(/^\d{2}:\d{2}$/, "Must be HH:MM format"),
+
+  // Flags
+  countdownSupport: z.boolean(),
+  duplicateCheck: z.boolean(),
+  recheckEnabled: z.boolean(),
+
+  // ID range
+  minIds: z.coerce.number().min(0, "Must be 0 or greater"),
+  maxIds: z.coerce.number().min(0, "Must be 0 or greater"),
 });
 
 type CategoryFormValues = z.infer<typeof categorySchema>;
@@ -63,6 +86,15 @@ const defaultValues: CategoryFormValues = {
   submitEnabled: false,
   pricePerGoodId: 0,
   displayOrder: 0,
+  dailyLimitEnabled: false,
+  dailySubmitCount: 0,
+  submitStartTime: "00:00",
+  submitEndTime: "23:59",
+  countdownSupport: false,
+  duplicateCheck: true,
+  recheckEnabled: false,
+  minIds: 1,
+  maxIds: 100,
 };
 
 // ── Shared form (used by both Create and Edit dialogs) ────────────────────────
@@ -89,97 +121,251 @@ function CategoryForm({
 
   const status = watch("status");
   const submitEnabled = watch("submitEnabled");
+  const dailyLimitEnabled = watch("dailyLimitEnabled");
+  const countdownSupport = watch("countdownSupport");
+  const duplicateCheck = watch("duplicateCheck");
+  const recheckEnabled = watch("recheckEnabled");
 
   return (
-    <form id={formId} onSubmit={handleSubmit(onSubmit)} className="space-y-4 pt-1">
-      <div className="space-y-1.5">
-        <Label htmlFor={`${formId}-name`}>
-          Name <span className="text-destructive">*</span>
-        </Label>
-        <Input
-          id={`${formId}-name`}
-          {...register("name")}
-          placeholder="e.g. Excel Task A"
-        />
-        {errors.name && (
-          <p className="text-xs text-destructive">{errors.name.message}</p>
-        )}
-      </div>
+    <form id={formId} onSubmit={handleSubmit(onSubmit)}>
+      <ScrollArea className="max-h-[60vh] pr-4">
+        <div className="space-y-4 pt-1">
 
-      <div className="space-y-1.5">
-        <Label htmlFor={`${formId}-description`}>
-          Description <span className="text-destructive">*</span>
-        </Label>
-        <Input
-          id={`${formId}-description`}
-          {...register("description")}
-          placeholder="Short description"
-        />
-        {errors.description && (
-          <p className="text-xs text-destructive">{errors.description.message}</p>
-        )}
-      </div>
+          {/* Name */}
+          <div className="space-y-1.5">
+            <Label htmlFor={`${formId}-name`}>
+              Name <span className="text-destructive">*</span>
+            </Label>
+            <Input
+              id={`${formId}-name`}
+              {...register("name")}
+              placeholder="e.g. Excel Task A"
+            />
+            {errors.name && (
+              <p className="text-xs text-destructive">{errors.name.message}</p>
+            )}
+          </div>
 
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-1.5">
-          <Label htmlFor={`${formId}-price`}>Price per Good ID</Label>
-          <Input
-            id={`${formId}-price`}
-            type="number"
-            min={0}
-            step="any"
-            {...register("pricePerGoodId")}
-          />
-          {errors.pricePerGoodId && (
-            <p className="text-xs text-destructive">{errors.pricePerGoodId.message}</p>
+          {/* Description */}
+          <div className="space-y-1.5">
+            <Label htmlFor={`${formId}-description`}>
+              Description <span className="text-destructive">*</span>
+            </Label>
+            <Input
+              id={`${formId}-description`}
+              {...register("description")}
+              placeholder="Short description"
+            />
+            {errors.description && (
+              <p className="text-xs text-destructive">{errors.description.message}</p>
+            )}
+          </div>
+
+          {/* Price + Order */}
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <Label htmlFor={`${formId}-price`}>Price per Good ID</Label>
+              <Input
+                id={`${formId}-price`}
+                type="number"
+                min={0}
+                step="any"
+                {...register("pricePerGoodId")}
+              />
+              {errors.pricePerGoodId && (
+                <p className="text-xs text-destructive">{errors.pricePerGoodId.message}</p>
+              )}
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor={`${formId}-order`}>Display Order</Label>
+              <Input
+                id={`${formId}-order`}
+                type="number"
+                min={0}
+                {...register("displayOrder")}
+              />
+              {errors.displayOrder && (
+                <p className="text-xs text-destructive">{errors.displayOrder.message}</p>
+              )}
+            </div>
+          </div>
+
+          {/* Status */}
+          <div className="flex items-center justify-between rounded-lg border border-border px-4 py-3">
+            <div>
+              <p className="text-sm font-medium leading-none">Status</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                {status === "active" ? "Category is active" : "Category is inactive"}
+              </p>
+            </div>
+            <Switch
+              checked={status === "active"}
+              onCheckedChange={(checked) =>
+                setValue("status", checked ? "active" : "inactive", {
+                  shouldValidate: true,
+                })
+              }
+            />
+          </div>
+
+          {/* Submit Enabled */}
+          <div className="flex items-center justify-between rounded-lg border border-border px-4 py-3">
+            <div>
+              <p className="text-sm font-medium leading-none">Submit Enabled</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Allow users to submit in this category
+              </p>
+            </div>
+            <Switch
+              checked={submitEnabled}
+              onCheckedChange={(checked) =>
+                setValue("submitEnabled", checked, { shouldValidate: true })
+              }
+            />
+          </div>
+
+          <Separator />
+
+          {/* Daily Limit */}
+          <div className="flex items-center justify-between rounded-lg border border-border px-4 py-3">
+            <div>
+              <p className="text-sm font-medium leading-none">Daily Limit</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Restrict how many submissions per day
+              </p>
+            </div>
+            <Switch
+              checked={dailyLimitEnabled}
+              onCheckedChange={(checked) =>
+                setValue("dailyLimitEnabled", checked, { shouldValidate: true })
+              }
+            />
+          </div>
+
+          {dailyLimitEnabled && (
+            <div className="space-y-1.5">
+              <Label htmlFor={`${formId}-dailySubmitCount`}>Daily Submit Count</Label>
+              <Input
+                id={`${formId}-dailySubmitCount`}
+                type="number"
+                min={0}
+                {...register("dailySubmitCount")}
+              />
+              {errors.dailySubmitCount && (
+                <p className="text-xs text-destructive">{errors.dailySubmitCount.message}</p>
+              )}
+            </div>
           )}
-        </div>
 
-        <div className="space-y-1.5">
-          <Label htmlFor={`${formId}-order`}>Display Order</Label>
-          <Input
-            id={`${formId}-order`}
-            type="number"
-            min={0}
-            {...register("displayOrder")}
-          />
-          {errors.displayOrder && (
-            <p className="text-xs text-destructive">{errors.displayOrder.message}</p>
-          )}
-        </div>
-      </div>
+          {/* Time Window */}
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <Label htmlFor={`${formId}-submitStartTime`}>Submit Start Time</Label>
+              <Input
+                id={`${formId}-submitStartTime`}
+                type="time"
+                {...register("submitStartTime")}
+              />
+              {errors.submitStartTime && (
+                <p className="text-xs text-destructive">{errors.submitStartTime.message}</p>
+              )}
+            </div>
 
-      <div className="flex items-center justify-between rounded-lg border border-border px-4 py-3">
-        <div>
-          <p className="text-sm font-medium leading-none">Status</p>
-          <p className="text-xs text-muted-foreground mt-1">
-            {status === "active" ? "Category is active" : "Category is inactive"}
-          </p>
-        </div>
-        <Switch
-          checked={status === "active"}
-          onCheckedChange={(checked) =>
-            setValue("status", checked ? "active" : "inactive", {
-              shouldValidate: true,
-            })
-          }
-        />
-      </div>
+            <div className="space-y-1.5">
+              <Label htmlFor={`${formId}-submitEndTime`}>Submit End Time</Label>
+              <Input
+                id={`${formId}-submitEndTime`}
+                type="time"
+                {...register("submitEndTime")}
+              />
+              {errors.submitEndTime && (
+                <p className="text-xs text-destructive">{errors.submitEndTime.message}</p>
+              )}
+            </div>
+          </div>
 
-      <div className="flex items-center justify-between rounded-lg border border-border px-4 py-3">
-        <div>
-          <p className="text-sm font-medium leading-none">Submit Enabled</p>
-          <p className="text-xs text-muted-foreground mt-1">
-            Allow users to submit in this category
-          </p>
+          {/* Countdown Support */}
+          <div className="flex items-center justify-between rounded-lg border border-border px-4 py-3">
+            <div>
+              <p className="text-sm font-medium leading-none">Countdown Support</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Show countdown timer to users
+              </p>
+            </div>
+            <Switch
+              checked={countdownSupport}
+              onCheckedChange={(checked) =>
+                setValue("countdownSupport", checked, { shouldValidate: true })
+              }
+            />
+          </div>
+
+          <Separator />
+
+          {/* Duplicate Check */}
+          <div className="flex items-center justify-between rounded-lg border border-border px-4 py-3">
+            <div>
+              <p className="text-sm font-medium leading-none">Duplicate Check</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Reject duplicate ID submissions
+              </p>
+            </div>
+            <Switch
+              checked={duplicateCheck}
+              onCheckedChange={(checked) =>
+                setValue("duplicateCheck", checked, { shouldValidate: true })
+              }
+            />
+          </div>
+
+          {/* Recheck Enabled */}
+          <div className="flex items-center justify-between rounded-lg border border-border px-4 py-3">
+            <div>
+              <p className="text-sm font-medium leading-none">Recheck Enabled</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Allow re-checking previously submitted IDs
+              </p>
+            </div>
+            <Switch
+              checked={recheckEnabled}
+              onCheckedChange={(checked) =>
+                setValue("recheckEnabled", checked, { shouldValidate: true })
+              }
+            />
+          </div>
+
+          {/* Min / Max IDs */}
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <Label htmlFor={`${formId}-minIds`}>Min IDs</Label>
+              <Input
+                id={`${formId}-minIds`}
+                type="number"
+                min={0}
+                {...register("minIds")}
+              />
+              {errors.minIds && (
+                <p className="text-xs text-destructive">{errors.minIds.message}</p>
+              )}
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor={`${formId}-maxIds`}>Max IDs</Label>
+              <Input
+                id={`${formId}-maxIds`}
+                type="number"
+                min={0}
+                {...register("maxIds")}
+              />
+              {errors.maxIds && (
+                <p className="text-xs text-destructive">{errors.maxIds.message}</p>
+              )}
+            </div>
+          </div>
+
         </div>
-        <Switch
-          checked={submitEnabled}
-          onCheckedChange={(checked) =>
-            setValue("submitEnabled", checked, { shouldValidate: true })
-          }
-        />
-      </div>
+      </ScrollArea>
     </form>
   );
 }
@@ -374,7 +560,7 @@ export default function CategoriesPage() {
 
       {/* ── Create Dialog ─────────────────────────────────────────────────────── */}
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent className="sm:max-w-[480px]">
+        <DialogContent className="sm:max-w-[520px]">
           <DialogHeader>
             <DialogTitle>Create Category</DialogTitle>
           </DialogHeader>
@@ -406,7 +592,7 @@ export default function CategoriesPage() {
           if (!open) setEditTarget(null);
         }}
       >
-        <DialogContent className="sm:max-w-[480px]">
+        <DialogContent className="sm:max-w-[520px]">
           <DialogHeader>
             <DialogTitle>Edit Category</DialogTitle>
           </DialogHeader>
@@ -421,6 +607,15 @@ export default function CategoriesPage() {
                 submitEnabled: editTarget.submitEnabled,
                 pricePerGoodId: editTarget.pricePerGoodId,
                 displayOrder: editTarget.displayOrder,
+                dailyLimitEnabled: editTarget.dailyLimitEnabled,
+                dailySubmitCount: editTarget.dailySubmitCount,
+                submitStartTime: editTarget.submitStartTime,
+                submitEndTime: editTarget.submitEndTime,
+                countdownSupport: editTarget.countdownSupport,
+                duplicateCheck: editTarget.duplicateCheck,
+                recheckEnabled: editTarget.recheckEnabled,
+                minIds: editTarget.minIds,
+                maxIds: editTarget.maxIds,
               }}
               onSubmit={handleEdit}
             />
