@@ -41,6 +41,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Build Admin Panel
+        run: pnpm --filter @workspace/admin-panel run build
+        env:
+          BASE_PATH: /
+
       - name: Deploy to Cloudflare Workers
         working-directory: artifacts/api-server
         run: npx wrangler deploy --keep-vars

@@ -65,8 +65,22 @@ app.post("/api/webhook", handleWebhook);
 // ── Error & 404 ───────────────────────────────────────────────────────────────
 app.onError(errorHandler);
 app.notFound((c) => {
-  logger.warn("Route not found", { path: c.req.path });
-  return c.json({ ok: false, error: "Not found" }, 404);
+  const path = c.req.path;
+
+  // API and webhook routes: keep existing JSON 404 behaviour
+  if (
+    path.startsWith("/api/") ||
+    path === "/api" ||
+    path === "/webhook"
+  ) {
+    logger.warn("Route not found", { path });
+    return c.json({ ok: false, error: "Not found" }, 404);
+  }
+
+  // All other paths are SPA routes — serve index.html via Workers Assets
+  return c.env.ASSETS.fetch(
+    new Request(new URL("/index.html", c.req.url).toString()),
+  );
 });
 
 export { app };

@@ -5,3 +5,8 @@ compatibility_flags = ["nodejs_compat"]
 
 [vars]
 NODE_ENV = "production"
+
+[assets]
+directory = "../../artifacts/admin-panel/dist/public"
+binding = "ASSETS"
+not_found_handling = "single-page-application"

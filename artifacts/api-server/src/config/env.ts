@@ -16,4 +16,7 @@ export interface Env {
   // App
   NODE_ENV?: string;
   SUBMISSION_MAX_FILE_SIZE_BYTES?: string;
+
+  // Workers Assets binding — serves the built Admin Panel static files
+  ASSETS: Fetcher;
 }
