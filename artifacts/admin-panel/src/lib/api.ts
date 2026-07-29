@@ -26,7 +26,7 @@ export interface Category {
   updatedAt: string;
 }
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "";
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "/api";
 
 async function fetchApi<T>(endpoint: string, options?: RequestInit): Promise<T> {
   const token = localStorage.getItem("admin_token");
