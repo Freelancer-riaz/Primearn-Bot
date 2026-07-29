@@ -9,4 +9,4 @@ NODE_ENV = "production"
 [assets]
 directory = "../../artifacts/admin-panel/dist/public"
 binding = "ASSETS"
-not_found_handling = "single-page-application"
+run_worker_first = true
