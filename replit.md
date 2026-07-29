@@ -66,8 +66,8 @@ PrimeEarn Bot — a Telegram bot running on Cloudflare Workers.
 
 ## User preferences
 
-- ব্যবহারকারীর সঙ্গে সম্পূর্ণ বাংলায় যোগাযোগ করতে হবে।
-- ভবিষ্যতে কোনো কোড যোগ বা সম্পাদনা করা হলে পরিবর্তনের পরপরই GitHub-এর `origin` রিপোজিটরিতে commit করে push করার চেষ্টা করতে হবে।
+- ব্যবহারকারীর সঙ্গে সবসময় সম্পূর্ণ বাংলায় যোগাযোগ করতে হবে।
+- যেকোনো কোড পরিবর্তনের পরপরই GitHub-এর `origin` রিপোজিটরিতে commit করে push করতে হবে।
 - শুধু ব্যবহারকারী যে feature-এর নাম বলবে, সেটাই implement করতে হবে। অন্য কোনো optimization, refactor, formatting, dependency update বা unrelated file edit করা যাবে না।
 - কাজ শেষ হলে রিপোর্ট করতে হবে: কোন কোন file পরিবর্তন হয়েছে, কী implement হয়েছে, commit hash এবং push status।
 
