@@ -499,6 +499,7 @@ export default function CategoriesPage() {
       {/* Table */}
       {!isLoading && !isError && categories && categories.length > 0 && (
         <div className="bg-card border border-border rounded-xl shadow-sm overflow-hidden">
+          <div className="overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>
@@ -555,6 +556,7 @@ export default function CategoriesPage() {
               ))}
             </TableBody>
           </Table>
+          </div>
         </div>
       )}
 
