@@ -55,7 +55,7 @@ async function handleWebhook(c: Context<{ Bindings: Env }>) {
 }
 
 // ── Admin ─────────────────────────────────────────────────────────────────────
-app.route("/admin", adminRouter);
+app.route("/api/admin", adminRouter);
 
 // Primary path (matches registered Telegram webhook URL)
 app.post("/webhook", handleWebhook);
