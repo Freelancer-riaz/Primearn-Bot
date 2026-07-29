@@ -25,7 +25,7 @@ export function initBot(env: Env): Bot<PrimeEarnContext> {
     const bot = new Bot<PrimeEarnContext>(env.TELEGRAM_BOT_TOKEN);
 
     bot.use(createAuthMiddleware(app));
-    bot.use(createSubmissionMiddleware(app));
+    bot.use(createSubmissionMiddleware());
 
     const conversationStateManager = new ConversationStateManager(app);
     bot.use(
