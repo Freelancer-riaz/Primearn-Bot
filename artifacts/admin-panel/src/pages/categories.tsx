@@ -577,8 +577,8 @@ function CategoryEditDialog({
         if (!open) onClose();
       }}
     >
-      <DialogContent className="sm:max-w-[580px] p-0 gap-0 overflow-hidden">
-        <DialogHeader className="px-6 pt-6 pb-4 border-b border-border">
+      <DialogContent className="flex flex-col w-[calc(100%-2rem)] sm:w-auto sm:max-w-[580px] p-0 gap-0 max-h-[90dvh] sm:max-h-[88vh]">
+        <DialogHeader className="shrink-0 px-6 pt-6 pb-4 border-b border-border">
           <DialogTitle className="text-base font-semibold">
             Edit Category
             {editTarget && (
@@ -589,11 +589,11 @@ function CategoryEditDialog({
           </DialogTitle>
         </DialogHeader>
 
-        <form id={EDIT_FORM_ID} onSubmit={handleSubmit(handleInternalSubmit)}>
-          <Tabs defaultValue="general" className="w-full">
-            {/* Tab bar */}
-            <div className="px-6 pt-4 border-b border-border">
-              <TabsList className="h-auto p-0 bg-transparent rounded-none gap-0 w-full justify-start">
+        <form id={EDIT_FORM_ID} onSubmit={handleSubmit(handleInternalSubmit)} className="flex-1 min-h-0 overflow-hidden flex flex-col">
+          <Tabs defaultValue="general" className="flex-1 min-h-0 flex flex-col w-full">
+            {/* Tab bar — horizontally scrollable on mobile */}
+            <div className="shrink-0 px-6 pt-4 border-b border-border overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+              <TabsList className="h-auto p-0 bg-transparent rounded-none gap-0 min-w-max justify-start">
                 {[
                   { value: "general", label: "General", icon: Settings },
                   { value: "submission", label: "Submission", icon: Send },
@@ -622,9 +622,8 @@ function CategoryEditDialog({
             </div>
 
             {/* ── General Tab ──────────────────────────────────────────────── */}
-            <TabsContent value="general" className="mt-0">
-              <ScrollArea className="max-h-[52vh]">
-                <div className="px-6 py-5 space-y-4">
+            <TabsContent value="general" className="mt-0 flex-1 min-h-0 overflow-y-auto">
+              <div className="px-6 py-5 space-y-4">
 
                   {/* Category Name */}
                   <div className="space-y-1.5">
@@ -710,13 +709,11 @@ function CategoryEditDialog({
                   </div>
 
                 </div>
-              </ScrollArea>
             </TabsContent>
 
             {/* ── Submission Tab ───────────────────────────────────────────── */}
-            <TabsContent value="submission" className="mt-0">
-              <ScrollArea className="max-h-[52vh]">
-                <div className="px-6 py-5 space-y-4">
+            <TabsContent value="submission" className="mt-0 flex-1 min-h-0 overflow-y-auto">
+              <div className="px-6 py-5 space-y-4">
 
                   <SwitchRow
                     label="Submission Enable"
@@ -805,13 +802,11 @@ function CategoryEditDialog({
                   </div>
 
                 </div>
-              </ScrollArea>
             </TabsContent>
 
             {/* ── Google Sheet Tab ─────────────────────────────────────────── */}
-            <TabsContent value="sheet" className="mt-0">
-              <ScrollArea className="max-h-[52vh]">
-                <div className="px-6 py-5 space-y-5">
+            <TabsContent value="sheet" className="mt-0 flex-1 min-h-0 overflow-y-auto">
+              <div className="px-6 py-5 space-y-5">
 
                   {/* Sheet ID */}
                   <div className="space-y-1.5">
@@ -953,11 +948,10 @@ function CategoryEditDialog({
                   </div>
 
                 </div>
-              </ScrollArea>
             </TabsContent>
 
             {/* ── Statistics Tab ───────────────────────────────────────────── */}
-            <TabsContent value="statistics" className="mt-0">
+            <TabsContent value="statistics" className="mt-0 flex-1 min-h-0 overflow-y-auto">
               <div className="px-6 py-5">
                 <p className="text-xs text-muted-foreground mb-4">
                   Read-only summary for this category.
@@ -978,7 +972,7 @@ function CategoryEditDialog({
           </Tabs>
         </form>
 
-        <DialogFooter className="px-6 py-4 border-t border-border">
+        <DialogFooter className="shrink-0 px-6 py-4 border-t border-border">
           <Button variant="outline" onClick={onClose} disabled={isPending}>
             Cancel
           </Button>
