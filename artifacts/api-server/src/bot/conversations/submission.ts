@@ -7,9 +7,13 @@ import {
 import type { Env } from "../../config/env";
 import { ConversationStateManager } from "../../services/ConversationStateManager";
 import { SubmissionFlowService } from "../../services/SubmissionFlowService";
+import { SubmissionService } from "../../services/SubmissionService";
 import { buildCategorySelectionKeyboard, buildSubmissionTypeKeyboard, SUBMISSION_CB } from "../keyboards/submissionKeyboard";
 import { getSubmissionMaxFileSize, validateSubmissionFile } from "../validation/fileValidation";
+import { downloadAndParseExcel } from "../../lib/excel/parseSubmissionFile";
+import { ValidationError } from "../../core/errors/AppError";
 import type { PrimeEarnContext } from "../types";
+import { logger } from "../../core/logger";
 
 type SubmissionConversation = Conversation<PrimeEarnContext, Context>;
 
@@ -19,6 +23,7 @@ export function createSubmissionConversation(
 ) {
   const flowService = new SubmissionFlowService(app);
   const stateManager = new ConversationStateManager(app);
+  const submissionService = new SubmissionService(app);
   const maxFileSize = getSubmissionMaxFileSize(
     env.SUBMISSION_MAX_FILE_SIZE_BYTES,
   );
@@ -178,13 +183,101 @@ export function createSubmissionConversation(
     }
 
     await conversation.external(() => stateManager.complete(chatId));
+
     await ctx.reply(
       "━━━━━━━━━━━━━━━━━━━━━\n" +
-        "✅  File Received\n" +
+        "⏳  Processing File\n" +
         "━━━━━━━━━━━━━━━━━━━━━\n\n" +
-        "Your file has been uploaded successfully.\n" +
-        "Your submission is now being processed.\n\n" +
-        "You will receive the results shortly.",
+        "Your file is being processed.\n" +
+        "Please wait a moment...",
+    );
+
+    // ── Parse Excel & create submission ────────────────────────────────────────
+    // Retrieve the saved file ID from state, then download + parse the Excel.
+    const state = await conversation.external(() =>
+      stateManager.getStorage().getSubmissionFlow(chatId),
+    );
+
+    if (!state?.file) {
+      await ctx.reply("❌  Could not retrieve your uploaded file. Please use /submit to try again.");
+      return;
+    }
+
+    // Download the file from Telegram and extract UIDs from Column A.
+    let parsed: Awaited<ReturnType<typeof downloadAndParseExcel>>;
+    try {
+      parsed = await conversation.external(() =>
+        downloadAndParseExcel(state.file!.fileId, env.TELEGRAM_BOT_TOKEN),
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.error("Excel parse failed", { fileId: state.file.fileId, error: msg });
+      await ctx.reply(
+        "❌  Failed to read your Excel file.\n\n" +
+          "Please make sure it is a valid .xlsx file with IDs in Column A, then use /submit to try again.",
+      );
+      return;
+    }
+
+    // Build a stable file reference (Telegram file_path, no token embedded).
+    const fileRef = `tg:${parsed.filePath}`;
+
+    // Call SubmissionService with the real idList — this triggers Old ID Detection.
+    let submission: Awaited<ReturnType<typeof submissionService.validateAndCreate>>;
+    try {
+      submission = await conversation.external(() =>
+        submissionService.validateAndCreate(
+          {
+            telegramId,
+            categoryId: category.id,
+            categoryName: category.name,
+            submissionType,
+            fileName: state.file!.fileName,
+            fileUrl: fileRef,
+            totalIds: parsed.totalIds,
+            duplicateIds: parsed.duplicateIds,
+            idList: parsed.uniqueIds,
+            sourceSubmissionId: recheckSource?.id ?? null,
+          },
+          category,
+        ),
+      );
+    } catch (err) {
+      if (err instanceof ValidationError) {
+        await ctx.reply(`❌  ${err.message}`);
+      } else {
+        const msg = err instanceof Error ? err.message : String(err);
+        logger.error("Submission creation failed", { telegramId, categoryId: category.id, error: msg });
+        await ctx.reply(
+          "❌  An error occurred while processing your submission.\n\n" +
+            "Please try again later or contact support.",
+        );
+      }
+      return;
+    }
+
+    // ── Submission Report ─────────────────────────────────────────────────────
+    const invalidIds = Math.max(
+      0,
+      parsed.totalIds - parsed.duplicateIds - submission.oldIds - submission.validIds,
+    );
+
+    await ctx.reply(
+      "━━━━━━━━━━━━━━━━━━━━━\n" +
+        "✅  Submission Received\n" +
+        "━━━━━━━━━━━━━━━━━━━━━\n\n" +
+        `📋  Category      ${category.name}\n` +
+        `🆔  Submission    #${submission.id.slice(-8).toUpperCase()}\n\n` +
+        "━━━━━━━━━━━━━━━━━━━━━\n" +
+        "📊  Submission Report\n" +
+        "━━━━━━━━━━━━━━━━━━━━━\n\n" +
+        `📥  Total IDs        ${submission.totalIds}\n` +
+        `✅  Accepted IDs     ${submission.validIds}\n` +
+        `🔁  Duplicate IDs    ${submission.duplicateIds}\n` +
+        `🕐  Old IDs          ${submission.oldIds}\n` +
+        `❌  Invalid IDs      ${invalidIds}\n\n` +
+        "Your submission is now pending review.\n" +
+        "You will be notified once it is processed.",
     );
   };
 }
