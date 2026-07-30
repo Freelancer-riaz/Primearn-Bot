@@ -1,0 +1,146 @@
+Task: Convert the entire Submission Flow into a Single Editable Message Navigation System.
+
+Current behavior:
+
+Every button click sends a NEW message.
+
+Example:
+
+Main Menu
+↓
+Category
+↓
+Submission Type
+↓
+Upload Screen
+↓
+Processing
+↓
+Report
+
+All previous screens remain visible in chat.
+
+This creates a messy conversation.
+
+━━━━━━━━━━━━━━━━━━━━━━
+
+Required behavior:
+
+Only ONE navigation message should exist.
+
+Every step must EDIT the previous message instead of sending a new one.
+
+Example:
+
+Main Menu
+↓ (Edit Message)
+Category
+↓ (Edit Message)
+Submission Type
+↓ (Edit Message)
+Upload Screen
+↓ (Edit Message)
+Processing...
+↓ (Edit Message)
+Submission Report
+
+User should feel like navigating inside an app instead of scrolling through chat.
+
+━━━━━━━━━━━━━━━━━━━━━━
+
+Back Navigation
+
+Every screen (except Main Menu) must have:
+
+⬅️ Back
+❌ Cancel
+
+Back should edit the SAME message and return to the previous screen.
+
+Cancel should exit the flow, clear Firestore conversation state, and return to Main Menu.
+
+━━━━━━━━━━━━━━━━━━━━━━
+
+Screens to convert
+
+Convert these screens to editable navigation:
+
+• Category Selection
+• Submission Type Selection
+• Upload Screen
+• Processing Screen
+• Submission Report
+• Validation Errors
+• Upload Errors
+• Cancel Screen
+
+━━━━━━━━━━━━━━━━━━━━━━
+
+DO NOT edit these messages:
+
+The uploaded Excel file itself.
+
+Telegram system messages.
+
+User messages.
+
+Only bot navigation messages should be edited.
+
+━━━━━━━━━━━━━━━━━━━━━━
+
+Conversation History
+
+When navigating:
+
+Old navigation pages should disappear because the same message is edited.
+
+There should NOT be:
+
+Category
+↓
+
+Type
+↓
+
+Upload
+
+all remaining in chat.
+
+Only the latest page should be visible.
+
+━━━━━━━━━━━━━━━━━━━━━━
+
+Technical Requirements
+
+Use Telegram editMessageText()
+
+Use editMessageReplyMarkup()
+
+Track navigation state safely.
+
+Handle "message is not modified" errors safely.
+
+If editing fails because the message no longer exists, create a new message and continue.
+
+━━━━━━━━━━━━━━━━━━━━━━
+
+Do NOT modify any business logic.
+
+Do NOT modify:
+
+• Excel parser
+• Duplicate detection
+• Old ID detection
+• Firestore logic
+• Submission validation
+• Daily limit
+• Wallet
+• Report logic
+
+Only improve navigation and UI behavior.
+
+━━━━━━━━━━━━━━━━━━━━━━
+
+Goal
+
+Make the bot feel like a professional mobile application instead of a normal Telegram chat.
