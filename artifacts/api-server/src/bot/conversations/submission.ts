@@ -8,7 +8,7 @@ import { SubmissionService } from "../../services/SubmissionService";
 import {
   buildCategorySelectionKeyboard,
   buildSubmissionTypeKeyboard,
-  buildUploadCancelKeyboard,
+  buildUploadKeyboard,
   SUBMISSION_CB,
 } from "../keyboards/submissionKeyboard";
 import { buildMainMenuKeyboard, MENU_BUTTONS } from "../keyboards/mainMenuKeyboard";
@@ -140,104 +140,115 @@ export function createSubmissionConversation(app: FirebaseApp, env: Env) {
         : null,
     );
 
-    await ctx.reply(
+    const typePrompt =
       "━━━━━━━━━━━━━━━━━━━━━\n" +
-        `📂  ${category.name}\n` +
-        "━━━━━━━━━━━━━━━━━━━━━\n\n" +
-        `📊  Daily Limit       ${category.dailyLimitEnabled ? `Enabled (${category.dailySubmitCount}/day)` : "Disabled"}\n` +
-        `🔍  Duplicate Check   ${category.duplicateCheck ? "Enabled" : "Disabled"}\n\n` +
-        "Choose your submission type:",
-      { reply_markup: buildSubmissionTypeKeyboard(Boolean(recheckSource)) },
-    );
+      `📂  ${category.name}\n` +
+      "━━━━━━━━━━━━━━━━━━━━━\n\n" +
+      `📊  Daily Limit       ${category.dailyLimitEnabled ? `Enabled (${category.dailySubmitCount}/day)` : "Disabled"}\n` +
+      `🔍  Duplicate Check   ${category.duplicateCheck ? "Enabled" : "Disabled"}\n\n` +
+      "Choose your submission type:";
 
-    // ── Submission type selection ──────────────────────────────────────────
-    let submissionTypeData = "";
-    while (true) {
-      const update = await conversation.wait();
-      if (isEscapeUpdate(update)) {
-        await handleCancel(update);
-        return;
-      }
-      const data = update.callbackQuery?.data ?? "";
-      if (data === SUBMISSION_CB.TYPE_NORMAL || data === SUBMISSION_CB.TYPE_RECHECK) {
-        await update.answerCallbackQuery();
-        submissionTypeData = data;
-        break;
-      }
-      if (update.callbackQuery) await update.answerCallbackQuery();
-      await update.reply(
-        "⚠️  Please choose a submission type using the buttons above.",
-      );
-    }
+    await ctx.reply(typePrompt, {
+      reply_markup: buildSubmissionTypeKeyboard(Boolean(recheckSource)),
+    });
 
-    const isRecheck = submissionTypeData === SUBMISSION_CB.TYPE_RECHECK;
-    if (isRecheck && !recheckSource) {
-      await clearState();
-      await ctx.reply("❌  Recheck submissions are not available for this category.");
-      return;
-    }
-
-    const submissionType = isRecheck ? "recheck" : "normal";
-    await conversation.external(() =>
-      stateManager.setType(chatId, submissionType, recheckSource?.id ?? null),
-    );
-
-    await ctx.reply(
-      "━━━━━━━━━━━━━━━━━━━━━\n" +
-        "📎  Upload Your File\n" +
-        "━━━━━━━━━━━━━━━━━━━━━\n\n" +
-        "Send your .xlsx file now.\n\n" +
-        "  ✔  Format:    Excel (.xlsx only)\n" +
-        "  ✔  Max size:  10 MB\n\n" +
-        "Or press ❌ Cancel to leave upload mode.",
-      { reply_markup: buildUploadCancelKeyboard() },
-    );
-
-    // ── File upload ────────────────────────────────────────────────────────
-    // Accepts ONLY .xlsx documents. Every other message type (text, sticker,
-    // photo, voice, …) gets a friendly prompt instead of locking the bot.
-    // Escape routes (menu buttons, /start, /cancel, inline Cancel) always win.
+    // ── Type → Upload outer loop (Back re-enters type selection) ──────────
     let uploadedFileId = "";
     let uploadedFileName = "";
-    while (true) {
-      const update = await conversation.wait();
+    let submissionType: "normal" | "recheck" = "normal";
 
-      if (isEscapeUpdate(update)) {
-        await handleCancel(update);
+    typeUploadLoop: while (true) {
+      // ── Submission type selection ────────────────────────────────────────
+      let submissionTypeData = "";
+      while (true) {
+        const update = await conversation.wait();
+        if (isEscapeUpdate(update)) {
+          await handleCancel(update);
+          return;
+        }
+        const data = update.callbackQuery?.data ?? "";
+        if (data === SUBMISSION_CB.TYPE_NORMAL || data === SUBMISSION_CB.TYPE_RECHECK) {
+          await update.answerCallbackQuery();
+          submissionTypeData = data;
+          break;
+        }
+        if (update.callbackQuery) await update.answerCallbackQuery();
+        await update.reply(
+          "⚠️  Please choose a submission type using the buttons above.",
+        );
+      }
+
+      const isRecheck = submissionTypeData === SUBMISSION_CB.TYPE_RECHECK;
+      if (isRecheck && !recheckSource) {
+        await clearState();
+        await ctx.reply("❌  Recheck submissions are not available for this category.");
         return;
       }
 
-      const doc = update.message?.document;
-      if (!doc) {
-        // Non-document message (text, sticker, photo, etc.)
-        await update.reply(
-          "⚠️  Please upload an Excel (.xlsx) file.\n\n" +
-            "Or press ❌ Cancel to leave upload mode.",
-          { reply_markup: buildUploadCancelKeyboard() },
-        );
-        continue;
-      }
-
-      const validation = validateSubmissionFile(doc, maxFileSize);
-      if (!validation.valid) {
-        await update.reply(
-          `⚠️  ${validation.error ?? "Invalid file. Please upload a valid .xlsx file."}`,
-          { reply_markup: buildUploadCancelKeyboard() },
-        );
-        continue;
-      }
-
+      submissionType = isRecheck ? "recheck" : "normal";
       await conversation.external(() =>
-        stateManager.setFile(chatId, {
-          fileId: doc.file_id,
-          fileName: doc.file_name ?? "submission.xlsx",
-          fileSize: doc.file_size ?? null,
-          mimeType: doc.mime_type ?? null,
-        }),
+        stateManager.setType(chatId, submissionType, recheckSource?.id ?? null),
       );
-      uploadedFileId = doc.file_id;
-      uploadedFileName = doc.file_name ?? "submission.xlsx";
-      break;
+
+      await ctx.reply(
+        "━━━━━━━━━━━━━━━━━━━━━\n" +
+          "📎  Upload Your File\n" +
+          "━━━━━━━━━━━━━━━━━━━━━\n\n" +
+          "Send your .xlsx file now.\n\n" +
+          "  ✔  Format:    Excel (.xlsx only)\n" +
+          "  ✔  Max size:  10 MB",
+        { reply_markup: buildUploadKeyboard() },
+      );
+
+      // ── File upload ──────────────────────────────────────────────────────
+      // Back → re-show type selection. Cancel/escape → exit flow entirely.
+      while (true) {
+        const update = await conversation.wait();
+
+        if (isEscapeUpdate(update)) {
+          await handleCancel(update);
+          return;
+        }
+
+        // ⬅️ Back — re-show type prompt and restart the outer loop
+        if (update.callbackQuery?.data === SUBMISSION_CB.BACK) {
+          await update.answerCallbackQuery();
+          await update.reply(typePrompt, {
+            reply_markup: buildSubmissionTypeKeyboard(Boolean(recheckSource)),
+          });
+          continue typeUploadLoop;
+        }
+
+        const doc = update.message?.document;
+        if (!doc) {
+          await update.reply(
+            "⚠️  Please upload an Excel (.xlsx) file.",
+            { reply_markup: buildUploadKeyboard() },
+          );
+          continue;
+        }
+
+        const validation = validateSubmissionFile(doc, maxFileSize);
+        if (!validation.valid) {
+          await update.reply(
+            `⚠️  ${validation.error ?? "Invalid file. Please upload a valid .xlsx file."}`,
+            { reply_markup: buildUploadKeyboard() },
+          );
+          continue;
+        }
+
+        await conversation.external(() =>
+          stateManager.setFile(chatId, {
+            fileId: doc.file_id,
+            fileName: doc.file_name ?? "submission.xlsx",
+            fileSize: doc.file_size ?? null,
+            mimeType: doc.mime_type ?? null,
+          }),
+        );
+        uploadedFileId = doc.file_id;
+        uploadedFileName = doc.file_name ?? "submission.xlsx";
+        break typeUploadLoop; // file accepted — proceed to processing
+      }
     }
 
     await conversation.external(() => stateManager.complete(chatId));

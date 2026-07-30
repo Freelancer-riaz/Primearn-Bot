@@ -6,6 +6,7 @@ export const SUBMISSION_CB = {
   TYPE_NORMAL: "submit:type:normal",
   TYPE_RECHECK: "submit:type:recheck",
   CANCEL: "submit:cancel",
+  BACK: "submit:back",
 } as const;
 
 export function buildCategorySelectionKeyboard(
@@ -33,7 +34,12 @@ export function buildSubmissionTypeKeyboard(
   return keyboard;
 }
 
-/** Inline keyboard shown during file upload — single cancel button. */
-export function buildUploadCancelKeyboard(): InlineKeyboard {
-  return new InlineKeyboard().text("❌ Cancel Upload", SUBMISSION_CB.CANCEL);
+/**
+ * Inline keyboard shown during file upload.
+ * Back returns to the submission-type step; Cancel exits the entire flow.
+ */
+export function buildUploadKeyboard(): InlineKeyboard {
+  return new InlineKeyboard()
+    .text("⬅️ Back", SUBMISSION_CB.BACK)
+    .text("❌ Cancel", SUBMISSION_CB.CANCEL);
 }
