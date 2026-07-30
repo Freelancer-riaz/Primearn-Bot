@@ -1,0 +1,132 @@
+Implement ONLY the connection between the Excel parser and the new Old ID Detection system.
+
+Do NOT redesign any UI.
+Do NOT implement Google Sheet writing.
+Do NOT modify unrelated logic.
+
+==================================================
+OBJECTIVE
+==================================================
+
+The Firestore index (submitted_ids) already exists.
+
+The Old ID repository already exists.
+
+Now connect the Excel parser to this system.
+
+==================================================
+IMPLEMENT
+==================================================
+
+After parsing the uploaded Excel file:
+
+1.
+
+Extract every valid UID into an array.
+
+Example:
+
+idList = [
+"61591......",
+"61592......",
+"61593......"
+]
+
+2.
+
+Pass this idList into SubmissionService.
+
+3.
+
+SubmissionService must automatically:
+
+- Detect Duplicate IDs (same uploaded file)
+- Detect Old IDs (submitted_ids collection)
+- Keep only NEW IDs
+
+4.
+
+Create the submission using ONLY the NEW IDs.
+
+5.
+
+Save ONLY NEW IDs into submitted_ids.
+
+==================================================
+REPORT
+==================================================
+
+Submission Report must now correctly calculate:
+
+Total IDs
+
+Accepted IDs
+
+Duplicate IDs
+
+Old IDs
+
+Invalid IDs
+
+Formula:
+
+Accepted IDs =
+
+Total IDs
+− Duplicate IDs
+− Old IDs
+− Invalid IDs
+
+==================================================
+IMPORTANT
+==================================================
+
+Old IDs and Duplicate IDs are NOT the same.
+
+Duplicate IDs
+
+= Same UID appears multiple times inside the uploaded file.
+
+Old IDs
+
+= UID already exists inside Firestore submitted_ids.
+
+==================================================
+DO NOT IMPLEMENT
+==================================================
+
+Google Sheet writing
+
+Google Sheet mapping
+
+Admin Report
+
+Balance
+
+Statistics
+
+UI redesign
+
+Upload Limit changes
+
+Daily Limit changes
+
+==================================================
+GOAL
+==================================================
+
+After this task,
+
+Old ID Detection must actually work with uploaded Excel files.
+
+No placeholder logic.
+
+No dummy idList.
+
+Use the real parsed IDs.
+
+After finishing provide only:
+
+- Changed files
+- Short summary
+- Commit hash
