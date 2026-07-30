@@ -1,14 +1,17 @@
 import type { Context } from "grammy";
 import type { FirebaseApp } from "../../config/firebase";
-import {
-  type Conversation,
-  type ConversationFlavor,
-} from "@grammyjs/conversations";
+import { type Conversation } from "@grammyjs/conversations";
 import type { Env } from "../../config/env";
 import { ConversationStateManager } from "../../services/ConversationStateManager";
 import { SubmissionFlowService } from "../../services/SubmissionFlowService";
 import { SubmissionService } from "../../services/SubmissionService";
-import { buildCategorySelectionKeyboard, buildSubmissionTypeKeyboard, SUBMISSION_CB } from "../keyboards/submissionKeyboard";
+import {
+  buildCategorySelectionKeyboard,
+  buildSubmissionTypeKeyboard,
+  buildUploadCancelKeyboard,
+  SUBMISSION_CB,
+} from "../keyboards/submissionKeyboard";
+import { buildMainMenuKeyboard, MENU_BUTTONS } from "../keyboards/mainMenuKeyboard";
 import { getSubmissionMaxFileSize, validateSubmissionFile } from "../validation/fileValidation";
 import { downloadAndParseExcel } from "../../lib/excel/parseSubmissionFile";
 import { ValidationError } from "../../core/errors/AppError";
@@ -17,16 +20,26 @@ import { logger } from "../../core/logger";
 
 type SubmissionConversation = Conversation<PrimeEarnContext, Context>;
 
-export function createSubmissionConversation(
-  app: FirebaseApp,
-  env: Env,
-) {
+/**
+ * Returns true when the incoming update should immediately exit the
+ * submission conversation: any Main Menu button, /start, or /cancel.
+ */
+function isEscapeUpdate(ctx: Context): boolean {
+  const text = ctx.message?.text ?? "";
+  const menuTexts = Object.values(MENU_BUTTONS) as string[];
+  return (
+    text.startsWith("/start") ||
+    text === "/cancel" ||
+    menuTexts.includes(text) ||
+    ctx.callbackQuery?.data === SUBMISSION_CB.CANCEL
+  );
+}
+
+export function createSubmissionConversation(app: FirebaseApp, env: Env) {
   const flowService = new SubmissionFlowService(app);
   const stateManager = new ConversationStateManager(app);
   const submissionService = new SubmissionService(app);
-  const maxFileSize = getSubmissionMaxFileSize(
-    env.SUBMISSION_MAX_FILE_SIZE_BYTES,
-  );
+  const maxFileSize = getSubmissionMaxFileSize(env.SUBMISSION_MAX_FILE_SIZE_BYTES);
 
   return async function submissionConversation(
     conversation: SubmissionConversation,
@@ -36,6 +49,30 @@ export function createSubmissionConversation(
 
     const telegramId = ctx.from.id;
     const chatId = ctx.chatId;
+
+    // Clears our custom Firestore submission draft state.
+    // grammY automatically removes its own conversation_states when the
+    // conversation function returns, so we only need to clean our side.
+    const clearState = () =>
+      conversation.external(() =>
+        stateManager.getStorage().deleteSubmissionFlow(chatId),
+      );
+
+    // Called on any cancel/escape path — clears state and shows main menu.
+    const handleCancel = async (triggerCtx: Context) => {
+      await clearState();
+      if (triggerCtx.callbackQuery) {
+        await triggerCtx.answerCallbackQuery();
+      }
+      await triggerCtx.reply(
+        "❌  Cancelled\n\n" +
+          "Your submission has been cancelled.\n\n" +
+          "Use the Submit button to start a new submission.",
+        { reply_markup: buildMainMenuKeyboard() },
+      );
+    };
+
+    // ── Init ───────────────────────────────────────────────────────────────
     await conversation.external(() =>
       stateManager.startSubmissionFlow(telegramId, chatId),
     );
@@ -44,57 +81,58 @@ export function createSubmissionConversation(
       flowService.getSelectableCategories(),
     );
     if (categories.length === 0) {
+      await clearState();
       await ctx.reply(
         "⏸  No Submissions Available\n\n" +
-        "No categories are accepting submissions right now.\n" +
-        "Please check back later.",
+          "No categories are accepting submissions right now.\n" +
+          "Please check back later.",
       );
       return;
     }
 
     await ctx.reply(
       "📋  Select a Category\n\n" +
-      "Choose a category below to start your submission:",
-      {
-        reply_markup: buildCategorySelectionKeyboard(categories),
-      },
+        "Choose a category below to start your submission:",
+      { reply_markup: buildCategorySelectionKeyboard(categories) },
     );
 
-    console.log("WAITING_FOR_CATEGORY");
-    const categoryContext = await conversation.waitForCallbackQuery(
-      new RegExp(`^${SUBMISSION_CB.CATEGORY_PREFIX}(.+)$`),
-      {
-        otherwise: async (otherContext) => {
-          if (otherContext.callbackQuery) {
-            await otherContext.answerCallbackQuery();
-          }
-          await otherContext.reply(
-            "⚠️  Please use the buttons above to select a category.",
-          );
-        },
-      },
-    );
-    console.log("CATEGORY_CALLBACK_RECEIVED");
-    console.log("callbackQuery.data:", categoryContext.callbackQuery.data);
-    await categoryContext.answerCallbackQuery();
+    // ── Category selection ─────────────────────────────────────────────────
+    // Uses conversation.wait() so we can intercept escape routes before they
+    // are consumed by the waitForCallbackQuery otherwise handler.
+    const categoryRegex = new RegExp(`^${SUBMISSION_CB.CATEGORY_PREFIX}(.+)$`);
+    let categoryData = "";
+    while (true) {
+      const update = await conversation.wait();
+      if (isEscapeUpdate(update)) {
+        await handleCancel(update);
+        return;
+      }
+      const data = update.callbackQuery?.data ?? "";
+      if (categoryRegex.test(data)) {
+        await update.answerCallbackQuery();
+        categoryData = data;
+        break;
+      }
+      if (update.callbackQuery) await update.answerCallbackQuery();
+      await update.reply(
+        "⚠️  Please use the buttons above to select a category.",
+      );
+    }
 
-    const categoryId = categoryContext.callbackQuery.data.slice(
-      SUBMISSION_CB.CATEGORY_PREFIX.length,
-    );
+    const categoryId = categoryData.slice(SUBMISSION_CB.CATEGORY_PREFIX.length);
     const category = await conversation.external(() =>
       flowService.getCategory(categoryId),
     );
     if (!category) {
-      await categoryContext.reply(
+      await clearState();
+      await ctx.reply(
         "❌  That category is no longer available.\n\n" +
-        "Please use /submit to start a new submission.",
+          "Please use /submit to start a new submission.",
       );
       return;
     }
 
-    await conversation.external(() =>
-      stateManager.setCategory(chatId, category),
-    );
+    await conversation.external(() => stateManager.setCategory(chatId, category));
 
     const recheckSource = await conversation.external(() =>
       category.recheckEnabled
@@ -102,83 +140,103 @@ export function createSubmissionConversation(
         : null,
     );
 
-    await categoryContext.reply(
+    await ctx.reply(
       "━━━━━━━━━━━━━━━━━━━━━\n" +
         `📂  ${category.name}\n` +
         "━━━━━━━━━━━━━━━━━━━━━\n\n" +
         `📊  Daily Limit       ${category.dailyLimitEnabled ? `Enabled (${category.dailySubmitCount}/day)` : "Disabled"}\n` +
         `🔍  Duplicate Check   ${category.duplicateCheck ? "Enabled" : "Disabled"}\n\n` +
         "Choose your submission type:",
-      {
-        reply_markup: buildSubmissionTypeKeyboard(Boolean(recheckSource)),
-      },
+      { reply_markup: buildSubmissionTypeKeyboard(Boolean(recheckSource)) },
     );
 
-    const typeContext = await conversation.waitForCallbackQuery(
-      [SUBMISSION_CB.TYPE_NORMAL, SUBMISSION_CB.TYPE_RECHECK],
-      {
-        otherwise: async (otherContext) => {
-          if (otherContext.callbackQuery) {
-            await otherContext.answerCallbackQuery();
-          }
-          await otherContext.reply(
-            "⚠️  Please choose a submission type using the buttons above.",
-          );
-        },
-      },
-    );
-    await typeContext.answerCallbackQuery();
-
-    const isRecheck = typeContext.callbackQuery.data === SUBMISSION_CB.TYPE_RECHECK;
-    if (isRecheck && !recheckSource) {
-      await typeContext.reply(
-        "❌  Recheck submissions are not available for this category.",
+    // ── Submission type selection ──────────────────────────────────────────
+    let submissionTypeData = "";
+    while (true) {
+      const update = await conversation.wait();
+      if (isEscapeUpdate(update)) {
+        await handleCancel(update);
+        return;
+      }
+      const data = update.callbackQuery?.data ?? "";
+      if (data === SUBMISSION_CB.TYPE_NORMAL || data === SUBMISSION_CB.TYPE_RECHECK) {
+        await update.answerCallbackQuery();
+        submissionTypeData = data;
+        break;
+      }
+      if (update.callbackQuery) await update.answerCallbackQuery();
+      await update.reply(
+        "⚠️  Please choose a submission type using the buttons above.",
       );
+    }
+
+    const isRecheck = submissionTypeData === SUBMISSION_CB.TYPE_RECHECK;
+    if (isRecheck && !recheckSource) {
+      await clearState();
+      await ctx.reply("❌  Recheck submissions are not available for this category.");
       return;
     }
 
     const submissionType = isRecheck ? "recheck" : "normal";
     await conversation.external(() =>
-      stateManager.setType(
-        chatId,
-        submissionType,
-        recheckSource?.id ?? null,
-      ),
+      stateManager.setType(chatId, submissionType, recheckSource?.id ?? null),
     );
 
-    await typeContext.reply(
+    await ctx.reply(
       "━━━━━━━━━━━━━━━━━━━━━\n" +
         "📎  Upload Your File\n" +
         "━━━━━━━━━━━━━━━━━━━━━\n\n" +
         "Send your .xlsx file now.\n\n" +
         "  ✔  Format:    Excel (.xlsx only)\n" +
-        "  ✔  Max size:  10 MB",
+        "  ✔  Max size:  10 MB\n\n" +
+        "Or press ❌ Cancel to leave upload mode.",
+      { reply_markup: buildUploadCancelKeyboard() },
     );
 
+    // ── File upload ────────────────────────────────────────────────────────
+    // Accepts ONLY .xlsx documents. Every other message type (text, sticker,
+    // photo, voice, …) gets a friendly prompt instead of locking the bot.
+    // Escape routes (menu buttons, /start, /cancel, inline Cancel) always win.
+    let uploadedFileId = "";
+    let uploadedFileName = "";
     while (true) {
-      const fileContext = await conversation.waitFor("message:document", {
-        otherwise: (otherContext) =>
-          otherContext.reply(
-            "⚠️  Please upload a valid .xlsx document file.",
-          ),
-      });
-      const document = fileContext.msg.document;
-      const validation = validateSubmissionFile(document, maxFileSize);
+      const update = await conversation.wait();
+
+      if (isEscapeUpdate(update)) {
+        await handleCancel(update);
+        return;
+      }
+
+      const doc = update.message?.document;
+      if (!doc) {
+        // Non-document message (text, sticker, photo, etc.)
+        await update.reply(
+          "⚠️  Please upload an Excel (.xlsx) file.\n\n" +
+            "Or press ❌ Cancel to leave upload mode.",
+          { reply_markup: buildUploadCancelKeyboard() },
+        );
+        continue;
+      }
+
+      const validation = validateSubmissionFile(doc, maxFileSize);
       if (!validation.valid) {
-        await fileContext.reply(
+        await update.reply(
           `⚠️  ${validation.error ?? "Invalid file. Please upload a valid .xlsx file."}`,
+          { reply_markup: buildUploadCancelKeyboard() },
         );
         continue;
       }
 
       await conversation.external(() =>
         stateManager.setFile(chatId, {
-          fileId: document.file_id,
-          fileName: document.file_name!,
-          fileSize: document.file_size ?? null,
-          mimeType: document.mime_type ?? null,
+          fileId: doc.file_id,
+          fileName: doc.file_name ?? "submission.xlsx",
+          fileSize: doc.file_size ?? null,
+          mimeType: doc.mime_type ?? null,
         }),
       );
+      uploadedFileId = doc.file_id;
+      uploadedFileName = doc.file_name ?? "submission.xlsx";
       break;
     }
 
@@ -192,37 +250,26 @@ export function createSubmissionConversation(
         "Please wait a moment...",
     );
 
-    // ── Parse Excel & create submission ────────────────────────────────────────
-    // Retrieve the saved file ID from state, then download + parse the Excel.
-    const state = await conversation.external(() =>
-      stateManager.getStorage().getSubmissionFlow(chatId),
-    );
-
-    if (!state?.file) {
-      await ctx.reply("❌  Could not retrieve your uploaded file. Please use /submit to try again.");
-      return;
-    }
-
-    // Download the file from Telegram and extract UIDs from Column A.
+    // ── Parse Excel ────────────────────────────────────────────────────────
     let parsed: Awaited<ReturnType<typeof downloadAndParseExcel>>;
     try {
       parsed = await conversation.external(() =>
-        downloadAndParseExcel(state.file!.fileId, env.TELEGRAM_BOT_TOKEN),
+        downloadAndParseExcel(uploadedFileId, env.TELEGRAM_BOT_TOKEN),
       );
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      logger.error("Excel parse failed", { fileId: state.file.fileId, error: msg });
+      logger.error("Excel parse failed", { fileId: uploadedFileId, error: msg });
+      await clearState();
       await ctx.reply(
-        "❌  Failed to read your Excel file.\n\n" +
-          "Please make sure it is a valid .xlsx file with IDs in Column A, then use /submit to try again.",
+        "❌  Upload failed.\n\nPlease try again.",
+        { reply_markup: buildMainMenuKeyboard() },
       );
       return;
     }
 
-    // Build a stable file reference (Telegram file_path, no token embedded).
     const fileRef = `tg:${parsed.filePath}`;
 
-    // Call SubmissionService with the real idList — this triggers Old ID Detection.
+    // ── Create submission ──────────────────────────────────────────────────
     let submission: Awaited<ReturnType<typeof submissionService.validateAndCreate>>;
     try {
       submission = await conversation.external(() =>
@@ -232,7 +279,7 @@ export function createSubmissionConversation(
             categoryId: category.id,
             categoryName: category.name,
             submissionType,
-            fileName: state.file!.fileName,
+            fileName: uploadedFileName,
             fileUrl: fileRef,
             totalIds: parsed.totalIds,
             duplicateIds: parsed.duplicateIds,
@@ -243,20 +290,28 @@ export function createSubmissionConversation(
         ),
       );
     } catch (err) {
+      await clearState();
       if (err instanceof ValidationError) {
-        await ctx.reply(`❌  ${err.message}`);
+        await ctx.reply(
+          `❌  ${err.message}`,
+          { reply_markup: buildMainMenuKeyboard() },
+        );
       } else {
         const msg = err instanceof Error ? err.message : String(err);
-        logger.error("Submission creation failed", { telegramId, categoryId: category.id, error: msg });
+        logger.error("Submission creation failed", {
+          telegramId,
+          categoryId: category.id,
+          error: msg,
+        });
         await ctx.reply(
-          "❌  An error occurred while processing your submission.\n\n" +
-            "Please try again later or contact support.",
+          "❌  Upload failed.\n\nPlease try again.",
+          { reply_markup: buildMainMenuKeyboard() },
         );
       }
       return;
     }
 
-    // ── Submission Report ─────────────────────────────────────────────────────
+    // ── Submission Report ──────────────────────────────────────────────────
     const invalidIds = Math.max(
       0,
       parsed.totalIds - parsed.duplicateIds - submission.oldIds - submission.validIds,
