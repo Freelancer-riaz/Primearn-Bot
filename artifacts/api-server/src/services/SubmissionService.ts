@@ -64,6 +64,10 @@ export class SubmissionService {
     let oldIdCount = 0;
     let newIdList: string[] | undefined;
 
+    logger.info("[DEBUG 1] Parser IDs", {
+      parserIds: req.idList?.length ?? 0,
+    });
+
     if (req.idList && req.idList.length > 0) {
       const separated = await this.submittedIdRepo.separateOldIds(
         req.idList,
@@ -71,6 +75,10 @@ export class SubmissionService {
       );
       oldIdCount = separated.oldIds.length;
       newIdList = separated.newIds;
+      logger.info("[DEBUG 2] Old ID Result", {
+        oldIds: separated.oldIds.length,
+        newIds: separated.newIds.length,
+      });
     }
 
     // validIds = unique file IDs that are neither intra-file duplicates nor old
@@ -78,6 +86,10 @@ export class SubmissionService {
       0,
       req.totalIds - req.duplicateIds - oldIdCount,
     );
+    logger.info("[DEBUG 3] Validation Input", {
+      validIds,
+      minimumRequired: category.minIds,
+    });
     this.validateIdCount(validIds, category);
 
     const today = this.todayUTC();
