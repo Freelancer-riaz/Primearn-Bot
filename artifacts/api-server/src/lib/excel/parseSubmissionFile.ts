@@ -51,8 +51,8 @@ export async function downloadAndParseExcel(
   }
   const buffer = await fileRes.arrayBuffer();
 
-  // 3. Parse with SheetJS — array mode so row[0] is Column A
-  const workbook = XLSX.read(new Uint8Array(buffer), { type: "array" });
+  // 3. Parse with SheetJS — dense: false so we can access cells directly
+  const workbook = XLSX.read(new Uint8Array(buffer), { type: "array", dense: false });
   const sheetName = workbook.SheetNames[0];
   if (!sheetName) {
     throw new Error("Excel file contains no sheets.");
@@ -62,21 +62,66 @@ export async function downloadAndParseExcel(
     throw new Error("Could not read the first sheet.");
   }
 
-  const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1 });
-
-  // 4. Extract non-empty Column A values
-  const allIds: string[] = [];
-  for (const row of rows) {
-    if (!Array.isArray(row)) continue;
-    const cell = row[0];
-    if (cell === null || cell === undefined) continue;
-    const val = String(cell).trim();
-    if (val !== "") {
-      allIds.push(val);
-    }
+  // 4. Determine the full worksheet range using !ref
+  const ref = sheet["!ref"];
+  if (!ref) {
+    console.log("[Excel Debug] Worksheet has no !ref — empty sheet");
+    return {
+      allIds: [],
+      uniqueIds: [],
+      totalIds: 0,
+      duplicateIds: 0,
+      filePath,
+    };
   }
 
-  // 5. Deduplicate (preserves first occurrence order)
+  const range = XLSX.utils.decode_range(ref);
+  const firstDataRow = 1; // Row index 1 = row 2 (skip header row 0)
+  const lastRow = range.e.r;
+
+  console.log(`[Excel Debug] Worksheet range: ${ref}`);
+  console.log(`[Excel Debug] Total rows to scan: ${lastRow - firstDataRow + 1} (rows ${firstDataRow + 1}–${lastRow + 1})`);
+
+  // 5. Scan EVERY row in Column A — never stop early
+  const allIds: string[] = [];
+  let skippedEmpty = 0;
+
+  for (let rowIdx = firstDataRow; rowIdx <= lastRow; rowIdx++) {
+    const cellAddress = XLSX.utils.encode_cell({ r: rowIdx, c: 0 }); // Column A
+    const cell = sheet[cellAddress];
+
+    // Skip truly empty / missing cells
+    if (cell === undefined || cell === null) {
+      skippedEmpty++;
+      continue;
+    }
+
+    // Use cell.w (formatted text) when available to preserve leading zeros,
+    // otherwise fall back to cell.v (raw value) converted safely to string.
+    let val: string;
+    if (cell.w !== undefined && cell.w !== null) {
+      val = String(cell.w).trim();
+    } else if (cell.v !== undefined && cell.v !== null) {
+      val = String(cell.v).trim();
+    } else {
+      skippedEmpty++;
+      continue;
+    }
+
+    if (val === "") {
+      skippedEmpty++;
+      continue;
+    }
+
+    allIds.push(val);
+  }
+
+  console.log(`[Excel Debug] Extracted IDs count: ${allIds.length}`);
+  console.log(`[Excel Debug] Skipped empty rows: ${skippedEmpty}`);
+  console.log(`[Excel Debug] First 10 IDs: ${JSON.stringify(allIds.slice(0, 10))}`);
+  console.log(`[Excel Debug] Last 10 IDs: ${JSON.stringify(allIds.slice(-10))}`);
+
+  // 6. Deduplicate (preserves first occurrence order)
   const seen = new Set<string>();
   const uniqueIds: string[] = [];
   let duplicateIds = 0;
