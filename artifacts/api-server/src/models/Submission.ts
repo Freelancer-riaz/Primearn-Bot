@@ -17,7 +17,8 @@ export interface Submission {
   // ID counts
   totalIds: number;
   duplicateIds: number; // duplicates within the uploaded file (Column A)
-  validIds: number; // totalIds - duplicateIds
+  oldIds: number;       // IDs already present in submitted_ids (Old ID Detection)
+  validIds: number;     // totalIds - duplicateIds - oldIds
 
   // Timing
   submitDate: string; // "YYYY-MM-DD" — used for daily limit checks

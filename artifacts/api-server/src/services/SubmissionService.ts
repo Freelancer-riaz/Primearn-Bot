@@ -1,5 +1,6 @@
 import type { FirebaseApp } from "../config/firebase";
 import { SubmissionRepository } from "../repositories/SubmissionRepository";
+import { SubmittedIdRepository } from "../repositories/SubmittedIdRepository";
 import type {
   Submission,
   SubmissionType,
@@ -22,6 +23,13 @@ export interface CreateSubmissionRequest {
   totalIds: number;
   /** Duplicates detected within the uploaded file (Column A). */
   duplicateIds: number;
+  /**
+   * Deduplicated list of valid IDs parsed from the file.
+   * When provided, each ID is checked against submitted_ids for Old ID
+   * Detection. When omitted (e.g. parsing not yet implemented), old ID
+   * detection is skipped and oldIds defaults to 0.
+   */
+  idList?: string[];
   /** sourceSubmissionId is required when submissionType === "recheck". */
   sourceSubmissionId?: string | null;
 }
@@ -30,9 +38,11 @@ export interface CreateSubmissionRequest {
 
 export class SubmissionService {
   private repo: SubmissionRepository;
+  private submittedIdRepo: SubmittedIdRepository;
 
   constructor(app: FirebaseApp) {
     this.repo = new SubmissionRepository(app);
+    this.submittedIdRepo = new SubmittedIdRepository(app);
   }
 
   // ── Public API ─────────────────────────────────────────────────────────────
@@ -47,7 +57,27 @@ export class SubmissionService {
     this.validateRecheckEnabled(req.submissionType, category);
     this.validateSubmitTimeWindow(category);
 
-    const validIds = Math.max(0, req.totalIds - req.duplicateIds);
+    // ── Old ID Detection ────────────────────────────────────────────────────
+    // When the caller supplies idList (deduplicated, valid IDs from the file),
+    // check each one against submitted_ids. IDs already present are "old" and
+    // are excluded from the submission. IDs that pass become genuinely new.
+    let oldIdCount = 0;
+    let newIdList: string[] | undefined;
+
+    if (req.idList && req.idList.length > 0) {
+      const separated = await this.submittedIdRepo.separateOldIds(
+        req.idList,
+        req.categoryId,
+      );
+      oldIdCount = separated.oldIds.length;
+      newIdList = separated.newIds;
+    }
+
+    // validIds = unique file IDs that are neither intra-file duplicates nor old
+    const validIds = Math.max(
+      0,
+      req.totalIds - req.duplicateIds - oldIdCount,
+    );
     this.validateIdCount(validIds, category);
 
     const today = this.todayUTC();
@@ -68,10 +98,11 @@ export class SubmissionService {
       type: req.submissionType,
       totalIds: req.totalIds,
       duplicateIds: req.duplicateIds,
+      oldIds: oldIdCount,
       validIds,
     });
 
-    return this.repo.create({
+    const submission = await this.repo.create({
       userId: String(req.telegramId),
       telegramId: req.telegramId,
       categoryId: req.categoryId,
@@ -81,6 +112,7 @@ export class SubmissionService {
       fileUrl: req.fileUrl,
       totalIds: req.totalIds,
       duplicateIds: req.duplicateIds,
+      oldIds: oldIdCount,
       validIds,
       submitDate: today,
       submitTime: this.currentTimeUTC(),
@@ -91,6 +123,20 @@ export class SubmissionService {
       sourceSubmissionId: req.sourceSubmissionId ?? null,
       adminNotes: null,
     });
+
+    // ── Index new IDs ───────────────────────────────────────────────────────
+    // Only genuinely new IDs are saved. Old IDs and intra-file duplicates
+    // are never written to submitted_ids.
+    if (newIdList && newIdList.length > 0) {
+      await this.submittedIdRepo.saveIds(
+        newIdList,
+        req.categoryId,
+        submission.id,
+        req.telegramId,
+      );
+    }
+
+    return submission;
   }
 
   /** Get a submission by ID. Throws NotFoundError if missing. */
