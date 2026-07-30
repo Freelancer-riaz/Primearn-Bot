@@ -27,6 +27,7 @@ export class ConversationStateRepository
       .collection(CONVERSATION_COLLECTION)
       .doc(chatId)
       .get();
+    console.log("CONVERSATION_STATE_READ", { chatId, exists: snap.exists });
     if (!snap.exists) return undefined;
     return (snap.data() as { state: VersionedState<ConversationData> }).state;
   }
@@ -35,6 +36,7 @@ export class ConversationStateRepository
     chatId: string,
     state: VersionedState<ConversationData>,
   ): Promise<void> {
+    console.log("CONVERSATION_STATE_WRITTEN", { chatId, version: state.version });
     await this.db
       .collection(CONVERSATION_COLLECTION)
       .doc(chatId)
@@ -42,6 +44,7 @@ export class ConversationStateRepository
   }
 
   async delete(chatId: string): Promise<void> {
+    console.log("CONVERSATION_STATE_DELETED", { chatId });
     await this.db.collection(CONVERSATION_COLLECTION).doc(chatId).delete();
   }
 
