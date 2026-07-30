@@ -3,12 +3,28 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Plus, FolderTree, Pencil, Trash2, Loader2, AlertCircle } from "lucide-react";
+import {
+  Plus,
+  FolderTree,
+  Pencil,
+  Trash2,
+  Loader2,
+  AlertCircle,
+  ChevronUp,
+  ChevronDown,
+  GripVertical,
+  X,
+  FileSpreadsheet,
+  BarChart3,
+  Settings,
+  Send,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
   Dialog,
   DialogContent,
@@ -45,7 +61,7 @@ import {
   type Category,
 } from "@/lib/api";
 
-// ── Validation schema ─────────────────────────────────────────────────────────
+// ── Validation schemas ────────────────────────────────────────────────────────
 
 const categorySchema = z.object({
   name: z.string().min(1, "Name is required"),
@@ -77,7 +93,13 @@ const categorySchema = z.object({
   maxIds: z.coerce.number().min(0, "Must be 0 or greater"),
 });
 
+// Edit schema adds UI-only fields not sent to the API
+const categoryEditSchema = categorySchema.extend({
+  categoryIcon: z.string().optional(),
+});
+
 type CategoryFormValues = z.infer<typeof categorySchema>;
+type CategoryEditFormValues = z.infer<typeof categoryEditSchema>;
 
 const defaultValues: CategoryFormValues = {
   name: "",
@@ -97,7 +119,11 @@ const defaultValues: CategoryFormValues = {
   maxIds: 100,
 };
 
-// ── Shared form (used by both Create and Edit dialogs) ────────────────────────
+// ── Default sheet columns ─────────────────────────────────────────────────────
+
+const DEFAULT_SHEET_COLUMNS = ["UID", "Password", "2FA", "Cookies", "Full Mail"];
+
+// ── Shared form (used by Create dialog — unchanged) ───────────────────────────
 
 function CategoryForm({
   formId,
@@ -370,6 +396,525 @@ function CategoryForm({
   );
 }
 
+// ── SwitchRow helper ──────────────────────────────────────────────────────────
+
+function SwitchRow({
+  label,
+  description,
+  checked,
+  onCheckedChange,
+}: {
+  label: string;
+  description?: string;
+  checked: boolean;
+  onCheckedChange: (v: boolean) => void;
+}) {
+  return (
+    <div className="flex items-center justify-between rounded-lg border border-border px-4 py-3">
+      <div>
+        <p className="text-sm font-medium leading-none">{label}</p>
+        {description && (
+          <p className="text-xs text-muted-foreground mt-1">{description}</p>
+        )}
+      </div>
+      <Switch checked={checked} onCheckedChange={onCheckedChange} />
+    </div>
+  );
+}
+
+// ── StatCard helper ───────────────────────────────────────────────────────────
+
+function StatCard({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="rounded-lg border border-border bg-background px-4 py-4">
+      <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">
+        {label}
+      </p>
+      <p className="text-2xl font-semibold text-foreground">{value}</p>
+    </div>
+  );
+}
+
+// ── Category Edit Dialog (tabbed) ─────────────────────────────────────────────
+
+const EDIT_FORM_ID = "edit-category-form";
+
+function CategoryEditDialog({
+  editTarget,
+  onClose,
+  onSubmit,
+  isPending,
+}: {
+  editTarget: Category | null;
+  onClose: () => void;
+  onSubmit: (data: CategoryEditFormValues) => void;
+  isPending: boolean;
+}) {
+  // Google Sheet local UI state (not persisted — UI only)
+  const [sheetId, setSheetId] = useState("");
+  const [worksheetName, setWorksheetName] = useState("");
+  const [columns, setColumns] = useState<string[]>(DEFAULT_SHEET_COLUMNS);
+  const [newColumnName, setNewColumnName] = useState("");
+
+  const {
+    register,
+    handleSubmit,
+    setValue,
+    watch,
+    formState: { errors },
+    reset,
+  } = useForm<CategoryEditFormValues>({
+    resolver: zodResolver(categoryEditSchema),
+    defaultValues: { ...defaultValues, categoryIcon: "" },
+  });
+
+  // Populate form when editTarget changes
+  const prevId = useState<string | null>(null);
+  if (editTarget && editTarget.id !== prevId[0]) {
+    prevId[0] = editTarget.id;
+    reset({
+      name: editTarget.name,
+      description: editTarget.description,
+      status: editTarget.status,
+      submitEnabled: editTarget.submitEnabled,
+      pricePerGoodId: editTarget.pricePerGoodId,
+      displayOrder: editTarget.displayOrder,
+      dailyLimitEnabled: editTarget.dailyLimitEnabled,
+      dailySubmitCount: editTarget.dailySubmitCount,
+      submitStartTime: editTarget.submitStartTime,
+      submitEndTime: editTarget.submitEndTime,
+      countdownSupport: editTarget.countdownSupport,
+      duplicateCheck: editTarget.duplicateCheck,
+      recheckEnabled: editTarget.recheckEnabled,
+      minIds: editTarget.minIds,
+      maxIds: editTarget.maxIds,
+      categoryIcon: "",
+    });
+    setSheetId("");
+    setWorksheetName("");
+    setColumns(DEFAULT_SHEET_COLUMNS);
+    setNewColumnName("");
+  }
+
+  const status = watch("status");
+  const submitEnabled = watch("submitEnabled");
+  const dailyLimitEnabled = watch("dailyLimitEnabled");
+  const duplicateCheck = watch("duplicateCheck");
+  const recheckEnabled = watch("recheckEnabled");
+
+  // Column reorder helpers
+  function moveColumn(index: number, direction: "up" | "down") {
+    const next = [...columns];
+    const swap = direction === "up" ? index - 1 : index + 1;
+    if (swap < 0 || swap >= next.length) return;
+    [next[index], next[swap]] = [next[swap], next[index]];
+    setColumns(next);
+  }
+
+  function removeColumn(index: number) {
+    setColumns((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  function addColumn() {
+    const trimmed = newColumnName.trim();
+    if (!trimmed) return;
+    setColumns((prev) => [...prev, trimmed]);
+    setNewColumnName("");
+  }
+
+  return (
+    <Dialog
+      open={!!editTarget}
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+    >
+      <DialogContent className="sm:max-w-[580px] p-0 gap-0 overflow-hidden">
+        <DialogHeader className="px-6 pt-6 pb-4 border-b border-border">
+          <DialogTitle className="text-base font-semibold">
+            Edit Category
+            {editTarget && (
+              <span className="ml-2 text-muted-foreground font-normal text-sm">
+                — {editTarget.name}
+              </span>
+            )}
+          </DialogTitle>
+        </DialogHeader>
+
+        <form id={EDIT_FORM_ID} onSubmit={handleSubmit(onSubmit)}>
+          <Tabs defaultValue="general" className="w-full">
+            {/* Tab bar */}
+            <div className="px-6 pt-4 border-b border-border">
+              <TabsList className="h-auto p-0 bg-transparent rounded-none gap-0 w-full justify-start">
+                {[
+                  { value: "general", label: "General", icon: Settings },
+                  { value: "submission", label: "Submission", icon: Send },
+                  { value: "sheet", label: "Google Sheet", icon: FileSpreadsheet },
+                  { value: "statistics", label: "Statistics", icon: BarChart3 },
+                ].map(({ value, label, icon: Icon }) => (
+                  <TabsTrigger
+                    key={value}
+                    value={value}
+                    className="
+                      relative rounded-none bg-transparent px-4 py-2.5 text-sm font-medium
+                      text-muted-foreground shadow-none border-0
+                      data-[state=active]:text-primary data-[state=active]:bg-transparent
+                      data-[state=active]:shadow-none
+                      after:absolute after:bottom-0 after:left-0 after:right-0 after:h-0.5
+                      after:bg-transparent data-[state=active]:after:bg-primary
+                      hover:text-foreground transition-colors
+                      flex items-center gap-1.5
+                    "
+                  >
+                    <Icon className="h-3.5 w-3.5" />
+                    {label}
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+            </div>
+
+            {/* ── General Tab ──────────────────────────────────────────────── */}
+            <TabsContent value="general" className="mt-0">
+              <ScrollArea className="max-h-[52vh]">
+                <div className="px-6 py-5 space-y-4">
+
+                  {/* Category Name */}
+                  <div className="space-y-1.5">
+                    <Label htmlFor="edit-name">
+                      Category Name <span className="text-destructive">*</span>
+                    </Label>
+                    <Input
+                      id="edit-name"
+                      {...register("name")}
+                      placeholder="e.g. Excel Task A"
+                    />
+                    {errors.name && (
+                      <p className="text-xs text-destructive">{errors.name.message}</p>
+                    )}
+                  </div>
+
+                  {/* Status */}
+                  <SwitchRow
+                    label="Status"
+                    description={status === "active" ? "Category is active" : "Category is inactive"}
+                    checked={status === "active"}
+                    onCheckedChange={(checked) =>
+                      setValue("status", checked ? "active" : "inactive", { shouldValidate: true })
+                    }
+                  />
+
+                  {/* Display Order + Price */}
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="edit-order">Display Order</Label>
+                      <Input
+                        id="edit-order"
+                        type="number"
+                        min={0}
+                        {...register("displayOrder")}
+                      />
+                      {errors.displayOrder && (
+                        <p className="text-xs text-destructive">{errors.displayOrder.message}</p>
+                      )}
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="edit-price">Price Per ID</Label>
+                      <Input
+                        id="edit-price"
+                        type="number"
+                        min={0}
+                        step="any"
+                        {...register("pricePerGoodId")}
+                      />
+                      {errors.pricePerGoodId && (
+                        <p className="text-xs text-destructive">{errors.pricePerGoodId.message}</p>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Description */}
+                  <div className="space-y-1.5">
+                    <Label htmlFor="edit-description">
+                      Description <span className="text-destructive">*</span>
+                    </Label>
+                    <Input
+                      id="edit-description"
+                      {...register("description")}
+                      placeholder="Short description"
+                    />
+                    {errors.description && (
+                      <p className="text-xs text-destructive">{errors.description.message}</p>
+                    )}
+                  </div>
+
+                  {/* Category Icon */}
+                  <div className="space-y-1.5">
+                    <Label htmlFor="edit-icon">Category Icon</Label>
+                    <Input
+                      id="edit-icon"
+                      {...register("categoryIcon")}
+                      placeholder="Emoji or icon code, e.g. 📊"
+                      maxLength={8}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Paste an emoji or short icon identifier shown in the bot menu.
+                    </p>
+                  </div>
+
+                </div>
+              </ScrollArea>
+            </TabsContent>
+
+            {/* ── Submission Tab ───────────────────────────────────────────── */}
+            <TabsContent value="submission" className="mt-0">
+              <ScrollArea className="max-h-[52vh]">
+                <div className="px-6 py-5 space-y-4">
+
+                  <SwitchRow
+                    label="Submission Enable"
+                    description="Allow users to submit in this category"
+                    checked={submitEnabled}
+                    onCheckedChange={(checked) =>
+                      setValue("submitEnabled", checked, { shouldValidate: true })
+                    }
+                  />
+
+                  <SwitchRow
+                    label="Duplicate Check"
+                    description="Reject duplicate ID submissions"
+                    checked={duplicateCheck}
+                    onCheckedChange={(checked) =>
+                      setValue("duplicateCheck", checked, { shouldValidate: true })
+                    }
+                  />
+
+                  <Separator />
+
+                  <SwitchRow
+                    label="Daily Limit Enable"
+                    description="Restrict how many submissions per day"
+                    checked={dailyLimitEnabled}
+                    onCheckedChange={(checked) =>
+                      setValue("dailyLimitEnabled", checked, { shouldValidate: true })
+                    }
+                  />
+
+                  {dailyLimitEnabled && (
+                    <div className="space-y-1.5">
+                      <Label htmlFor="edit-dailyCount">Daily Limit Count</Label>
+                      <Input
+                        id="edit-dailyCount"
+                        type="number"
+                        min={0}
+                        {...register("dailySubmitCount")}
+                      />
+                      {errors.dailySubmitCount && (
+                        <p className="text-xs text-destructive">{errors.dailySubmitCount.message}</p>
+                      )}
+                    </div>
+                  )}
+
+                  <Separator />
+
+                  <SwitchRow
+                    label="Recheck Enable"
+                    description="Allow re-checking previously submitted IDs"
+                    checked={recheckEnabled}
+                    onCheckedChange={(checked) =>
+                      setValue("recheckEnabled", checked, { shouldValidate: true })
+                    }
+                  />
+
+                  <Separator />
+
+                  {/* Time window */}
+                  <div>
+                    <p className="text-sm font-medium mb-3">Submission Window</p>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1.5">
+                        <Label htmlFor="edit-startTime">Start Time</Label>
+                        <Input
+                          id="edit-startTime"
+                          type="time"
+                          {...register("submitStartTime")}
+                        />
+                        {errors.submitStartTime && (
+                          <p className="text-xs text-destructive">{errors.submitStartTime.message}</p>
+                        )}
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="edit-endTime">End Time</Label>
+                        <Input
+                          id="edit-endTime"
+                          type="time"
+                          {...register("submitEndTime")}
+                        />
+                        {errors.submitEndTime && (
+                          <p className="text-xs text-destructive">{errors.submitEndTime.message}</p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                </div>
+              </ScrollArea>
+            </TabsContent>
+
+            {/* ── Google Sheet Tab ─────────────────────────────────────────── */}
+            <TabsContent value="sheet" className="mt-0">
+              <ScrollArea className="max-h-[52vh]">
+                <div className="px-6 py-5 space-y-5">
+
+                  {/* Sheet ID */}
+                  <div className="space-y-1.5">
+                    <Label htmlFor="edit-sheetId">Google Sheet ID</Label>
+                    <Input
+                      id="edit-sheetId"
+                      value={sheetId}
+                      onChange={(e) => setSheetId(e.target.value)}
+                      placeholder="e.g. 1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Found in the Google Sheets URL after /d/
+                    </p>
+                  </div>
+
+                  {/* Worksheet Name */}
+                  <div className="space-y-1.5">
+                    <Label htmlFor="edit-worksheetName">Worksheet Name</Label>
+                    <Input
+                      id="edit-worksheetName"
+                      value={worksheetName}
+                      onChange={(e) => setWorksheetName(e.target.value)}
+                      placeholder="e.g. Sheet1"
+                    />
+                  </div>
+
+                  <Separator />
+
+                  {/* Expected Admin Columns */}
+                  <div>
+                    <div className="flex items-center justify-between mb-3">
+                      <div>
+                        <p className="text-sm font-medium">Expected Admin Columns</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          Drag to reorder using the arrows
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      {columns.map((col, i) => (
+                        <div
+                          key={`${col}-${i}`}
+                          className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2"
+                        >
+                          <GripVertical className="h-4 w-4 text-muted-foreground/40 shrink-0" />
+                          <span className="flex-1 text-sm font-medium">{col}</span>
+                          <div className="flex items-center gap-0.5">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6"
+                              disabled={i === 0}
+                              onClick={() => moveColumn(i, "up")}
+                              aria-label="Move up"
+                            >
+                              <ChevronUp className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6"
+                              disabled={i === columns.length - 1}
+                              onClick={() => moveColumn(i, "down")}
+                              aria-label="Move down"
+                            >
+                              <ChevronDown className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6 text-muted-foreground hover:text-destructive"
+                              onClick={() => removeColumn(i)}
+                              aria-label={`Remove ${col}`}
+                            >
+                              <X className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Add extra column */}
+                    <div className="flex gap-2 mt-3">
+                      <Input
+                        value={newColumnName}
+                        onChange={(e) => setNewColumnName(e.target.value)}
+                        placeholder="Extra column name"
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            addColumn();
+                          }
+                        }}
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={addColumn}
+                        disabled={!newColumnName.trim()}
+                        className="shrink-0"
+                      >
+                        <Plus className="h-4 w-4 mr-1.5" />
+                        Add Column
+                      </Button>
+                    </div>
+                  </div>
+
+                </div>
+              </ScrollArea>
+            </TabsContent>
+
+            {/* ── Statistics Tab ───────────────────────────────────────────── */}
+            <TabsContent value="statistics" className="mt-0">
+              <div className="px-6 py-5">
+                <p className="text-xs text-muted-foreground mb-4">
+                  Read-only summary for this category.
+                </p>
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                  <StatCard label="Total Submission" value="—" />
+                  <StatCard label="Today's Submission" value="—" />
+                  <StatCard label="Duplicate" value="—" />
+                  <StatCard label="Invalid" value="—" />
+                  <StatCard label="Accepted" value="—" />
+                  <StatCard label="Rejected" value="—" />
+                </div>
+                <p className="text-xs text-muted-foreground mt-4">
+                  Statistics backend integration coming soon.
+                </p>
+              </div>
+            </TabsContent>
+          </Tabs>
+        </form>
+
+        <DialogFooter className="px-6 py-4 border-t border-border">
+          <Button variant="outline" onClick={onClose} disabled={isPending}>
+            Cancel
+          </Button>
+          <Button form={EDIT_FORM_ID} type="submit" disabled={isPending}>
+            {isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+            Save Changes
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function CategoriesPage() {
@@ -432,9 +977,11 @@ export default function CategoriesPage() {
     createMutation.mutate(data);
   }
 
-  function handleEdit(data: CategoryFormValues) {
+  function handleEdit(data: CategoryEditFormValues) {
     if (!editTarget) return;
-    updateMutation.mutate({ id: editTarget.id, data });
+    // Strip UI-only fields before sending to API
+    const { categoryIcon: _icon, ...rest } = data;
+    updateMutation.mutate({ id: editTarget.id, data: rest });
   }
 
   function handleDelete() {
@@ -500,67 +1047,67 @@ export default function CategoriesPage() {
       {!isLoading && !isError && categories && categories.length > 0 && (
         <div className="bg-card border border-border rounded-xl shadow-sm overflow-hidden">
           <div className="overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Description</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Submit Enabled</TableHead>
-                <TableHead className="text-right">Price / Good ID</TableHead>
-                <TableHead className="text-right">Order</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {categories.map((cat) => (
-                <TableRow key={cat.id}>
-                  <TableCell className="font-medium">{cat.name}</TableCell>
-                  <TableCell className="text-muted-foreground max-w-[200px] truncate">
-                    {cat.description}
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant={cat.status === "active" ? "default" : "secondary"}>
-                      {cat.status}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant={cat.submitEnabled ? "default" : "secondary"}>
-                      {cat.submitEnabled ? "Yes" : "No"}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-right">{cat.pricePerGoodId}</TableCell>
-                  <TableCell className="text-right">{cat.displayOrder}</TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex items-center justify-end gap-1">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => setEditTarget(cat)}
-                        aria-label={`Edit ${cat.name}`}
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => setDeleteTarget(cat)}
-                        aria-label={`Delete ${cat.name}`}
-                        className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </TableCell>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Description</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Submit Enabled</TableHead>
+                  <TableHead className="text-right">Price / Good ID</TableHead>
+                  <TableHead className="text-right">Order</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {categories.map((cat) => (
+                  <TableRow key={cat.id}>
+                    <TableCell className="font-medium">{cat.name}</TableCell>
+                    <TableCell className="text-muted-foreground max-w-[200px] truncate">
+                      {cat.description}
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant={cat.status === "active" ? "default" : "secondary"}>
+                        {cat.status}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant={cat.submitEnabled ? "default" : "secondary"}>
+                        {cat.submitEnabled ? "Yes" : "No"}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-right">{cat.pricePerGoodId}</TableCell>
+                    <TableCell className="text-right">{cat.displayOrder}</TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => setEditTarget(cat)}
+                          aria-label={`Edit ${cat.name}`}
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => setDeleteTarget(cat)}
+                          aria-label={`Delete ${cat.name}`}
+                          className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           </div>
         </div>
       )}
 
-      {/* ── Create Dialog ─────────────────────────────────────────────────────── */}
+      {/* ── Create Dialog (unchanged flat form) ───────────────────────────── */}
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent className="sm:max-w-[520px]">
           <DialogHeader>
@@ -587,57 +1134,15 @@ export default function CategoriesPage() {
         </DialogContent>
       </Dialog>
 
-      {/* ── Edit Dialog ───────────────────────────────────────────────────────── */}
-      <Dialog
-        open={!!editTarget}
-        onOpenChange={(open) => {
-          if (!open) setEditTarget(null);
-        }}
-      >
-        <DialogContent className="sm:max-w-[520px]">
-          <DialogHeader>
-            <DialogTitle>Edit Category</DialogTitle>
-          </DialogHeader>
-          {editTarget && (
-            <CategoryForm
-              key={editTarget.id}
-              formId="edit-category-form"
-              initialValues={{
-                name: editTarget.name,
-                description: editTarget.description,
-                status: editTarget.status,
-                submitEnabled: editTarget.submitEnabled,
-                pricePerGoodId: editTarget.pricePerGoodId,
-                displayOrder: editTarget.displayOrder,
-                dailyLimitEnabled: editTarget.dailyLimitEnabled,
-                dailySubmitCount: editTarget.dailySubmitCount,
-                submitStartTime: editTarget.submitStartTime,
-                submitEndTime: editTarget.submitEndTime,
-                countdownSupport: editTarget.countdownSupport,
-                duplicateCheck: editTarget.duplicateCheck,
-                recheckEnabled: editTarget.recheckEnabled,
-                minIds: editTarget.minIds,
-                maxIds: editTarget.maxIds,
-              }}
-              onSubmit={handleEdit}
-            />
-          )}
-          <DialogFooter>
-            <Button
-              form="edit-category-form"
-              type="submit"
-              disabled={updateMutation.isPending}
-            >
-              {updateMutation.isPending && (
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              )}
-              Save Changes
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* ── Edit Dialog (new tabbed UI) ────────────────────────────────────── */}
+      <CategoryEditDialog
+        editTarget={editTarget}
+        onClose={() => setEditTarget(null)}
+        onSubmit={handleEdit}
+        isPending={updateMutation.isPending}
+      />
 
-      {/* ── Delete Confirmation ───────────────────────────────────────────────── */}
+      {/* ── Delete Confirmation ───────────────────────────────────────────── */}
       <AlertDialog
         open={!!deleteTarget}
         onOpenChange={(open) => {
