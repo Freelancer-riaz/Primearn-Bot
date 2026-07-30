@@ -11,16 +11,13 @@ export class SubmittedIdRepository {
     this.db = app;
   }
 
-  private col() {
-    return this.db.collection(COLLECTION);
-  }
-
   /**
-   * Given a list of raw IDs and a category, returns two buckets:
-   *   - oldIds:  IDs that already exist in submitted_ids for this category
-   *   - newIds:  IDs that do NOT exist (safe to submit and index)
+   * Given a deduplicated list of UIDs and a category, separates them into:
+   *   - oldIds: UIDs already present in submitted_ids for this category
+   *   - newIds: UIDs not yet present (safe to accept and index)
    *
-   * All existence checks run in parallel for speed.
+   * Uses Firestore batchGet so the entire list is checked in
+   * ⌈ids.length / 100⌉ HTTP requests instead of one request per UID.
    */
   async separateOldIds(
     ids: string[],
@@ -28,19 +25,13 @@ export class SubmittedIdRepository {
   ): Promise<{ oldIds: string[]; newIds: string[] }> {
     if (ids.length === 0) return { oldIds: [], newIds: [] };
 
-    const checks = await Promise.all(
-      ids.map(async (uid) => {
-        const snap = await this.col()
-          .doc(submittedIdDocKey(categoryId, uid))
-          .get();
-        return { uid, exists: snap.exists };
-      }),
-    );
+    const docKeys = ids.map((uid) => submittedIdDocKey(categoryId, uid));
+    const existingKeys = await this.db.batchGetExists(COLLECTION, docKeys);
 
     const oldIds: string[] = [];
     const newIds: string[] = [];
-    for (const { uid, exists } of checks) {
-      if (exists) {
+    for (const uid of ids) {
+      if (existingKeys.has(submittedIdDocKey(categoryId, uid))) {
         oldIds.push(uid);
       } else {
         newIds.push(uid);
@@ -56,7 +47,8 @@ export class SubmittedIdRepository {
    * Only call this AFTER the parent submission document has been successfully
    * created. Duplicate and old IDs must already be excluded from the list.
    *
-   * All writes run in parallel.
+   * Uses Firestore commit so all writes are sent in
+   * ⌈ids.length / 500⌉ HTTP requests instead of one request per UID.
    */
   async saveIds(
     ids: string[],
@@ -69,21 +61,19 @@ export class SubmittedIdRepository {
     const submittedAt = new Date().toISOString();
     const submittedBy = String(telegramId);
 
-    await Promise.all(
-      ids.map((uid) => {
-        const docData: SubmittedId = {
-          uid,
-          categoryId,
-          submissionId,
-          submittedBy,
-          submittedAt,
-          status: "active",
-        };
-        return this.col()
-          .doc(submittedIdDocKey(categoryId, uid))
-          .set(docData as unknown as Record<string, unknown>);
-      }),
-    );
+    const docs = ids.map((uid) => ({
+      id: submittedIdDocKey(categoryId, uid),
+      data: {
+        uid,
+        categoryId,
+        submissionId,
+        submittedBy,
+        submittedAt,
+        status: "active",
+      } as unknown as Record<string, unknown>,
+    }));
+
+    await this.db.batchSetDocs(COLLECTION, docs);
 
     logger.info("Indexed submitted IDs", {
       count: ids.length,

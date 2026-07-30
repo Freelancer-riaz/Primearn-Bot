@@ -300,6 +300,103 @@ export class FirestoreDB {
     return { id: docIdFromName(doc.name ?? "") };
   }
 
+  /**
+   * Returns the Firestore resource-name prefix (without the REST base URL).
+   * Used to build fully-qualified document names for batch operations.
+   * e.g. "projects/my-project/databases/(default)/documents"
+   */
+  private get _baseName(): string {
+    return this._base.replace("https://firestore.googleapis.com/v1/", "");
+  }
+
+  /**
+   * Checks existence for many documents in a single batchGet request (or a
+   * small number of chunks when the list exceeds CHUNK_SIZE).
+   *
+   * Returns a Set of document IDs that exist in Firestore.
+   * Uses at most ⌈ids.length / CHUNK_SIZE⌉ subrequests instead of N.
+   */
+  async batchGetExists(
+    collection: string,
+    docIds: string[],
+  ): Promise<Set<string>> {
+    if (docIds.length === 0) return new Set();
+
+    const CHUNK = 100; // conservative; batchGet has no documented hard limit
+    const existingIds = new Set<string>();
+    const headers = await this._authHeaders();
+    const baseName = this._baseName;
+
+    for (let i = 0; i < docIds.length; i += CHUNK) {
+      const chunk = docIds.slice(i, i + CHUNK);
+      const documents = chunk.map(
+        (id) => `${baseName}/${collection}/${encodeURIComponent(id)}`,
+      );
+
+      const res = await fetch(`${this._base}:batchGet`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ documents }),
+      });
+
+      if (!res.ok) {
+        throw new Error(
+          `Firestore batchGet on ${collection} failed ${res.status}: ${await res.text()}`,
+        );
+      }
+
+      const results = (await res.json()) as Array<{
+        found?: FirestoreDocument;
+        missing?: string;
+      }>;
+
+      for (const result of results) {
+        if (result.found?.name) {
+          existingIds.add(docIdFromName(result.found.name));
+        }
+      }
+    }
+
+    return existingIds;
+  }
+
+  /**
+   * Upserts many documents in batched commit requests.
+   * Uses at most ⌈docs.length / 500⌉ subrequests (Firestore commit limit).
+   */
+  async batchSetDocs(
+    collection: string,
+    docs: Array<{ id: string; data: Record<string, unknown> }>,
+  ): Promise<void> {
+    if (docs.length === 0) return;
+
+    const CHUNK = 500; // Firestore commit limit
+    const headers = await this._authHeaders();
+    const baseName = this._baseName;
+
+    for (let i = 0; i < docs.length; i += CHUNK) {
+      const chunk = docs.slice(i, i + CHUNK);
+      const writes = chunk.map(({ id, data }) => ({
+        update: {
+          name: `${baseName}/${collection}/${encodeURIComponent(id)}`,
+          ...toDocument(data),
+        },
+      }));
+
+      const res = await fetch(`${this._base}:commit`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ writes }),
+      });
+
+      if (!res.ok) {
+        throw new Error(
+          `Firestore commit on ${collection} failed ${res.status}: ${await res.text()}`,
+        );
+      }
+    }
+  }
+
   async _runQuery(
     collection: string,
     filters: FieldFilter[],
