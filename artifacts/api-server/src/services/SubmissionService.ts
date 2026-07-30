@@ -51,7 +51,7 @@ export class SubmissionService {
     const today = this.todayUTC();
 
     if (req.submissionType === "normal") {
-      await this.validateNoDailyDuplicate(req.telegramId, category, today);
+      await this.validateDailyLimit(req.telegramId, category);
     } else {
       await this.validateRecheckReference(
         req.sourceSubmissionId,
@@ -236,25 +236,32 @@ export class SubmissionService {
   }
 
   /**
-   * Throws if the user already has a normal submission for this category today
-   * and the category's daily limit is enabled.
+   * Throws if the user has already reached the daily accepted-submission limit
+   * for this category (Asia/Dhaka calendar day, resets at 00:00 Asia/Dhaka).
+   *
+   * Only SUCCESSFUL (reportStatus === "accepted") submissions are counted.
+   * Validation failures, upload failures, cancelled, and rejected submissions
+   * are NOT counted.
+   *
+   * If dailyLimitEnabled is false the check is skipped (unlimited submissions).
    */
-  private async validateNoDailyDuplicate(
+  private async validateDailyLimit(
     telegramId: number,
     category: Category,
-    date: string,
   ): Promise<void> {
     if (!category.dailyLimitEnabled) return;
 
-    const existing = await this.repo.findNormalSubmissionToday(
+    const { start, end } = this.dhakaDayBoundsUTC();
+    const count = await this.repo.countAcceptedSubmissionsToday(
       telegramId,
       category.id,
-      date,
+      start,
+      end,
     );
 
-    if (existing) {
+    if (count >= category.dailySubmitCount) {
       throw new ValidationError(
-        `You have already submitted to "${category.name}" today. Try again tomorrow.`,
+        "Daily submission limit reached.\n\nYou have reached today's submission limit for this category.\n\nPlease try again tomorrow.",
       );
     }
   }
@@ -323,5 +330,43 @@ export class SubmissionService {
   /** Returns current time as "HH:MM:SS" in UTC. */
   private currentTimeUTC(): string {
     return new Date().toISOString().slice(11, 19);
+  }
+
+  /**
+   * Returns the UTC ISO boundaries of the current calendar day in Asia/Dhaka
+   * (UTC+6, no DST).
+   *
+   * Example: if it is 2025-07-15 10:00 Dhaka (04:00 UTC)
+   *   start → "2025-07-14T18:00:00.000Z"  (00:00 Dhaka in UTC)
+   *   end   → "2025-07-15T18:00:00.000Z"  (00:00 next Dhaka day in UTC)
+   */
+  private dhakaDayBoundsUTC(): { start: string; end: string } {
+    const DHAKA_OFFSET_MS = 6 * 60 * 60 * 1000; // UTC+6, no DST
+
+    const nowUTC = Date.now();
+    const nowDhaka = nowUTC + DHAKA_OFFSET_MS;
+
+    // Build a Date whose UTC fields represent the Dhaka wall-clock time
+    const d = new Date(nowDhaka);
+
+    // Midnight of today in Dhaka, as a UTC ms value
+    const midnightDhakaAsUTC = Date.UTC(
+      d.getUTCFullYear(),
+      d.getUTCMonth(),
+      d.getUTCDate(),
+      0,
+      0,
+      0,
+      0,
+    );
+
+    // Convert back to true UTC by subtracting the offset
+    const startUTC = midnightDhakaAsUTC - DHAKA_OFFSET_MS;
+    const endUTC = startUTC + 24 * 60 * 60 * 1000;
+
+    return {
+      start: new Date(startUTC).toISOString(),
+      end: new Date(endUTC).toISOString(),
+    };
   }
 }

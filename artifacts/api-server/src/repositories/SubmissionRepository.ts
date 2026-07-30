@@ -84,6 +84,31 @@ export class SubmissionRepository {
     return { id: d.id, ...d.data() } as Submission;
   }
 
+  /**
+   * Count accepted submissions for a user + category within a UTC time window.
+   * Used for the Asia/Dhaka daily submission limit check.
+   *
+   * Requires composite index: (telegramId, categoryId, reportStatus, createdAt).
+   *
+   * @param startUTC - ISO 8601 string: start of the Dhaka day expressed in UTC (inclusive)
+   * @param endUTC   - ISO 8601 string: start of the next Dhaka day expressed in UTC (exclusive)
+   */
+  async countAcceptedSubmissionsToday(
+    telegramId: number,
+    categoryId: string,
+    startUTC: string,
+    endUTC: string,
+  ): Promise<number> {
+    const snap = await this.col()
+      .where("telegramId", "==", telegramId)
+      .where("categoryId", "==", categoryId)
+      .where("reportStatus", "==", "accepted")
+      .where("createdAt", ">=", startUTC)
+      .where("createdAt", "<", endUTC)
+      .get();
+    return snap.docs.length;
+  }
+
   /** Create a new submission document. */
   async create(input: CreateSubmissionInput): Promise<Submission> {
     const now = new Date().toISOString();
