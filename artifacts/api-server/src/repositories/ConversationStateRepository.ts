@@ -29,18 +29,26 @@ export class ConversationStateRepository
       .get();
     console.log("CONVERSATION_STATE_READ", { chatId, exists: snap.exists });
     if (!snap.exists) return undefined;
-    return (snap.data() as { state: VersionedState<ConversationData> }).state;
+    const data = snap.data() as {
+      stateJson?: string;
+      state?: VersionedState<ConversationData>;
+    };
+    if (data.stateJson !== undefined) {
+      return JSON.parse(data.stateJson) as VersionedState<ConversationData>;
+    }
+    return data.state;
   }
 
   async write(
     chatId: string,
     state: VersionedState<ConversationData>,
   ): Promise<void> {
+    const stateJson = JSON.stringify(state);
     console.log("CONVERSATION_STATE_WRITTEN", { chatId, version: state.version });
     await this.db
       .collection(CONVERSATION_COLLECTION)
       .doc(chatId)
-      .set({ state: state as unknown as Record<string, unknown>, updatedAt: new Date().toISOString() });
+      .set({ stateJson, updatedAt: new Date().toISOString() });
   }
 
   async delete(chatId: string): Promise<void> {
