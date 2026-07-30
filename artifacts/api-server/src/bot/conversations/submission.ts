@@ -50,8 +50,10 @@ export function createSubmissionConversation(
     const categoryContext = await conversation.waitForCallbackQuery(
       new RegExp(`^${SUBMISSION_CB.CATEGORY_PREFIX}(.+)$`),
       {
-        otherwise: (otherContext) =>
-          otherContext.reply("Please select a category using the buttons above."),
+        otherwise: async (otherContext) => {
+          await otherContext.answerCallbackQuery();
+          await otherContext.reply("Please select a category using the buttons above.");
+        },
       },
     );
     await categoryContext.answerCallbackQuery();
@@ -90,8 +92,10 @@ export function createSubmissionConversation(
     const typeContext = await conversation.waitForCallbackQuery(
       [SUBMISSION_CB.TYPE_NORMAL, SUBMISSION_CB.TYPE_RECHECK],
       {
-        otherwise: (otherContext) =>
-          otherContext.reply("Please choose Normal or Recheck Submission."),
+        otherwise: async (otherContext) => {
+          await otherContext.answerCallbackQuery();
+          await otherContext.reply("Please choose Normal or Recheck Submission.");
+        },
       },
     );
     await typeContext.answerCallbackQuery();

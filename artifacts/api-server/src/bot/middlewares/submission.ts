@@ -1,7 +1,7 @@
 import type { Context, NextFunction } from "grammy";
 import { SUBMISSION_CB } from "../keyboards/submissionKeyboard";
 
-const CATEGORY_CALLBACK = /^submit:category:(.+)$/;
+const CATEGORY_CALLBACK = new RegExp(`^${SUBMISSION_CB.CATEGORY_PREFIX}(.+)$`);
 
 export function createSubmissionMiddleware() {
   return async (ctx: Context, next: NextFunction): Promise<void> => {
