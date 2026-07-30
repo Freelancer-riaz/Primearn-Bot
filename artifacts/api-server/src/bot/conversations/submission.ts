@@ -304,18 +304,45 @@ export function createSubmissionConversation(app: FirebaseApp, env: Env) {
             break fileWait;
           }
 
-          // ── Processing screen — edit nav message in-place ──────────────
+          // ── Remove nav keyboard — upload screen stays visible, no buttons ──
+          if (nav.msgId) {
+            try {
+              await ctx.api.editMessageReplyMarkup(chatId, nav.msgId, {
+                reply_markup: new InlineKeyboard(),
+              });
+            } catch { /* ignore */ }
+          }
+
+          // ── Send NEW status message directly below the Excel file ─────────
           await conversation.external(() => stateManager.complete(chatId));
-          await showNav(
+          const statusSent = await ctx.reply(
             "━━━━━━━━━━━━━━━━━━━━━\n" +
               "⏳  Processing File\n" +
               "━━━━━━━━━━━━━━━━━━━━━\n\n" +
               "Your file is being processed.\n" +
               "Please wait...",
-            new InlineKeyboard(),
           );
+          const statusMsgId = statusSent.message_id;
 
-          // ── Parse + submit — errors edit nav message and keep flow alive ─
+          /** Edits the status message; silently ignores "not modified". */
+          const editStatus = async (
+            text: string,
+            keyboard?: InlineKeyboard,
+          ): Promise<void> => {
+            try {
+              await ctx.api.editMessageText(chatId, statusMsgId, text, {
+                reply_markup: keyboard ?? new InlineKeyboard(),
+              });
+            } catch (e: unknown) {
+              const err = e as { error_code?: number; description?: string };
+              if (
+                err.error_code === 400 &&
+                err.description?.includes("message is not modified")
+              ) return;
+            }
+          };
+
+          // ── Parse + submit ─────────────────────────────────────────────
           type Parsed = Awaited<ReturnType<typeof downloadAndParseExcel>>;
           type Submission = Awaited<ReturnType<typeof submissionService.validateAndCreate>>;
 
@@ -376,9 +403,9 @@ export function createSubmissionConversation(app: FirebaseApp, env: Env) {
             }
           }
 
-          // ── Error: show error screen, wait for Back or Cancel ───────────
+          // ── Error: edit status message with error + Back/Cancel ──────────
           if (parsed === null || submission === null) {
-            await showNav(
+            await editStatus(
               buildProcessErrorScreen(processErrorMsg ?? "Unknown error"),
               buildUploadKeyboard(),
             );
@@ -388,22 +415,24 @@ export function createSubmissionConversation(app: FirebaseApp, env: Env) {
               if (isEscapeUpdate(errUpdate)) { await handleCancel(errUpdate); return; }
               if (errUpdate.callbackQuery?.data === SUBMISSION_CB.BACK) {
                 await errUpdate.answerCallbackQuery();
-                continue uploadLoop; // Back → re-show upload screen
+                // Delete status message; uploadLoop will restore nav keyboard
+                try { await ctx.api.deleteMessage(chatId, statusMsgId); } catch { /* ignore */ }
+                continue uploadLoop;
               }
               if (errUpdate.callbackQuery) await errUpdate.answerCallbackQuery();
             }
 
-            // TypeScript: unreachable — errorWait only exits via continue/return
+            // TypeScript: unreachable — errorWait exits only via continue/return
             continue uploadLoop;
           }
 
-          // ── Success: edit nav message to show Submission Report ─────────
+          // ── Success: edit status message to show Submission Report ───────
           const invalidIds = Math.max(
             0,
             parsed.totalIds - parsed.duplicateIds - submission.oldIds - submission.validIds,
           );
 
-          await showNav(
+          await editStatus(
             "━━━━━━━━━━━━━━━━━━━━━\n" +
               "✅  Submission Received\n" +
               "━━━━━━━━━━━━━━━━━━━━━\n\n" +
@@ -419,7 +448,6 @@ export function createSubmissionConversation(app: FirebaseApp, env: Env) {
               `❌  Invalid IDs      ${invalidIds}\n\n` +
               "Your submission is now pending review.\n" +
               "You will be notified once it is processed.",
-            new InlineKeyboard(),
           );
 
           return;
