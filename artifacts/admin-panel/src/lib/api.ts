@@ -5,6 +5,12 @@ export interface AdminApiResponse<T> {
   error?: string;
 }
 
+export interface SheetConfig {
+  sheetId: string;
+  worksheetName: string;
+  columns: string[];
+}
+
 export interface Category {
   id: string;
   name: string;
@@ -24,6 +30,7 @@ export interface Category {
   displayOrder: number;
   createdAt: string;
   updatedAt: string;
+  sheetConfig?: SheetConfig;
 }
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "/api";
@@ -112,4 +119,28 @@ export async function deleteCategory(id: string): Promise<void> {
   return fetchApi<void>(`/admin/categories/${id}`, {
     method: "DELETE",
   });
+}
+
+export interface SheetTestResult {
+  message: string;
+  code: string;
+}
+
+/**
+ * Asks the backend to verify that the service account can access the given
+ * spreadsheet and that the named worksheet exists.  Read-only — no data is
+ * written or modified on the sheet.
+ */
+export async function testSheetConnection(
+  categoryId: string,
+  sheetId: string,
+  worksheetName: string,
+): Promise<SheetTestResult> {
+  return fetchApi<SheetTestResult>(
+    `/admin/categories/${categoryId}/test-sheet-connection`,
+    {
+      method: "POST",
+      body: JSON.stringify({ sheetId, worksheetName }),
+    },
+  );
 }

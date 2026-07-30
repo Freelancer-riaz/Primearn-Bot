@@ -1,11 +1,20 @@
 export type CategoryStatus = "active" | "inactive";
 
+export interface SheetConfig {
+  sheetId: string;
+  worksheetName: string;
+  columns: string[];
+}
+
 export interface Category {
   id: string; // Firestore document ID
   name: string;
   description: string;
   pricePerGoodId: number;
   status: CategoryStatus;
+
+  // Google Sheets configuration (optional — set by admin)
+  sheetConfig?: SheetConfig;
 
   // Submit control
   submitEnabled: boolean;

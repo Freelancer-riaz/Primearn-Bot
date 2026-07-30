@@ -2,8 +2,10 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import type { Env } from "../../config/env";
 import { CategoryService } from "../../services/CategoryService";
+import { GoogleSheetsService } from "../../services/GoogleSheetsService";
 import { NotFoundError, ValidationError } from "../../core/errors/AppError";
 import { initFirebase } from "../../config/firebase";
+import type { ServiceAccount } from "../../lib/firestore/auth";
 
 const categoriesRouter = new Hono<{ Bindings: Env }>();
 
@@ -12,6 +14,14 @@ const categoriesRouter = new Hono<{ Bindings: Env }>();
 function getService(env: Env): CategoryService {
   const app = initFirebase(env);
   return new CategoryService(app);
+}
+
+function parseServiceAccount(env: Env): ServiceAccount {
+  const raw = env.FIREBASE_SERVICE_ACCOUNT_JSON;
+  if (typeof raw === "object" && raw !== null) {
+    return raw as unknown as ServiceAccount;
+  }
+  return JSON.parse(raw) as ServiceAccount;
 }
 
 function handleError(c: Context<{ Bindings: Env }>, err: unknown): Response {
@@ -120,6 +130,48 @@ categoriesRouter.delete("/:id", async (c) => {
   } catch (err) {
     return handleError(c, err);
   }
+});
+
+// ── POST /admin/categories/:id/test-sheet-connection ─────────────────────────
+//
+// Verifies that the service account can access the given Google Sheet and that
+// the named worksheet exists.  Read-only — no data is written or modified.
+
+categoriesRouter.post("/:id/test-sheet-connection", async (c) => {
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ success: false, error: "Invalid JSON body" }, 400);
+  }
+
+  if (typeof body !== "object" || body === null) {
+    return c.json({ success: false, error: "Request body must be an object" }, 400);
+  }
+
+  const { sheetId, worksheetName } = body as Record<string, unknown>;
+
+  if (typeof sheetId !== "string" || sheetId.trim() === "") {
+    return c.json({ success: false, error: "Field 'sheetId' is required" }, 400);
+  }
+  if (typeof worksheetName !== "string" || worksheetName.trim() === "") {
+    return c.json({ success: false, error: "Field 'worksheetName' is required" }, 400);
+  }
+
+  let sa: ServiceAccount;
+  try {
+    sa = parseServiceAccount(c.env);
+  } catch {
+    return c.json({ success: false, error: "Server configuration error: invalid service account" }, 500);
+  }
+
+  const sheetsService = new GoogleSheetsService(sa);
+  const result = await sheetsService.testConnection(sheetId.trim(), worksheetName.trim());
+
+  if (result.connected) {
+    return c.json({ success: true, data: { message: result.message, code: result.code } });
+  }
+  return c.json({ success: false, error: result.message }, 422);
 });
 
 export { categoriesRouter };

@@ -21,6 +21,7 @@ interface TokenCache {
 }
 
 let _cache: TokenCache | null = null;
+let _sheetsCache: TokenCache | null = null;
 
 // ---------------------------------------------------------------------------
 // Internal helpers
@@ -41,7 +42,7 @@ function stringToBase64url(str: string): string {
   );
 }
 
-async function createJWT(sa: ServiceAccount): Promise<string> {
+async function createJWT(sa: ServiceAccount, scope: string): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
 
   const headerB64 = stringToBase64url(
@@ -54,7 +55,7 @@ async function createJWT(sa: ServiceAccount): Promise<string> {
       aud: "https://oauth2.googleapis.com/token",
       iat: now,
       exp: now + 3600,
-      scope: "https://www.googleapis.com/auth/datastore",
+      scope,
     }),
   );
 
@@ -93,12 +94,7 @@ async function createJWT(sa: ServiceAccount): Promise<string> {
  * Returns a valid Google OAuth2 Bearer token scoped to Firestore.
  * Refreshes automatically when the cached token is within 60 s of expiry.
  */
-export async function getAccessToken(sa: ServiceAccount): Promise<string> {
-  const now = Date.now();
-  if (_cache && _cache.expiresAt > now + 60_000) return _cache.token;
-
-  const jwt = await createJWT(sa);
-
+async function exchangeJWT(jwt: string): Promise<{ access_token: string; expires_in: number }> {
   const res = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -107,17 +103,36 @@ export async function getAccessToken(sa: ServiceAccount): Promise<string> {
       assertion: jwt,
     }),
   });
-
   if (!res.ok) {
-    throw new Error(
-      `OAuth2 token exchange failed ${res.status}: ${await res.text()}`,
-    );
+    throw new Error(`OAuth2 token exchange failed ${res.status}: ${await res.text()}`);
   }
+  return res.json() as Promise<{ access_token: string; expires_in: number }>;
+}
 
-  const json = (await res.json()) as {
-    access_token: string;
-    expires_in: number;
-  };
+/**
+ * Returns a valid Google OAuth2 Bearer token scoped to Firestore.
+ * Refreshes automatically when the cached token is within 60 s of expiry.
+ */
+export async function getAccessToken(sa: ServiceAccount): Promise<string> {
+  const now = Date.now();
+  if (_cache && _cache.expiresAt > now + 60_000) return _cache.token;
+
+  const jwt = await createJWT(sa, "https://www.googleapis.com/auth/datastore");
+  const json = await exchangeJWT(jwt);
   _cache = { token: json.access_token, expiresAt: now + json.expires_in * 1000 };
   return _cache.token;
+}
+
+/**
+ * Returns a valid Google OAuth2 Bearer token scoped to Google Sheets (read-only).
+ * Uses a separate cache from the Firestore token.
+ */
+export async function getAccessTokenForSheets(sa: ServiceAccount): Promise<string> {
+  const now = Date.now();
+  if (_sheetsCache && _sheetsCache.expiresAt > now + 60_000) return _sheetsCache.token;
+
+  const jwt = await createJWT(sa, "https://www.googleapis.com/auth/spreadsheets.readonly");
+  const json = await exchangeJWT(jwt);
+  _sheetsCache = { token: json.access_token, expiresAt: now + json.expires_in * 1000 };
+  return _sheetsCache.token;
 }

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -58,7 +58,9 @@ import {
   createCategory,
   updateCategory,
   deleteCategory,
+  testSheetConnection,
   type Category,
+  type SheetConfig,
 } from "@/lib/api";
 
 // ── Validation schemas ────────────────────────────────────────────────────────
@@ -439,6 +441,13 @@ function StatCard({ label, value }: { label: string; value: string | number }) {
 
 const EDIT_FORM_ID = "edit-category-form";
 
+/** Shape passed to the parent's onSubmit — includes sheet config from local state */
+type CategoryEditSubmitData = CategoryEditFormValues & {
+  sheetConfig: SheetConfig;
+};
+
+type TestStatus = "idle" | "loading" | "success" | "error";
+
 function CategoryEditDialog({
   editTarget,
   onClose,
@@ -447,14 +456,18 @@ function CategoryEditDialog({
 }: {
   editTarget: Category | null;
   onClose: () => void;
-  onSubmit: (data: CategoryEditFormValues) => void;
+  onSubmit: (data: CategoryEditSubmitData) => void;
   isPending: boolean;
 }) {
-  // Google Sheet local UI state (not persisted — UI only)
+  // Google Sheet state (persisted via main "Save Changes")
   const [sheetId, setSheetId] = useState("");
   const [worksheetName, setWorksheetName] = useState("");
   const [columns, setColumns] = useState<string[]>(DEFAULT_SHEET_COLUMNS);
   const [newColumnName, setNewColumnName] = useState("");
+
+  // Test connection state
+  const [testStatus, setTestStatus] = useState<TestStatus>("idle");
+  const [testMessage, setTestMessage] = useState("");
 
   const {
     register,
@@ -468,10 +481,9 @@ function CategoryEditDialog({
     defaultValues: { ...defaultValues, categoryIcon: "" },
   });
 
-  // Populate form when editTarget changes
-  const prevId = useState<string | null>(null);
-  if (editTarget && editTarget.id !== prevId[0]) {
-    prevId[0] = editTarget.id;
+  // Populate form + sheet state whenever the target category changes
+  useEffect(() => {
+    if (!editTarget) return;
     reset({
       name: editTarget.name,
       description: editTarget.description,
@@ -490,11 +502,15 @@ function CategoryEditDialog({
       maxIds: editTarget.maxIds,
       categoryIcon: "",
     });
-    setSheetId("");
-    setWorksheetName("");
-    setColumns(DEFAULT_SHEET_COLUMNS);
+    // Restore saved sheet config or fall back to defaults
+    const cfg = editTarget.sheetConfig;
+    setSheetId(cfg?.sheetId ?? "");
+    setWorksheetName(cfg?.worksheetName ?? "");
+    setColumns(cfg?.columns?.length ? cfg.columns : DEFAULT_SHEET_COLUMNS);
     setNewColumnName("");
-  }
+    setTestStatus("idle");
+    setTestMessage("");
+  }, [editTarget?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const status = watch("status");
   const submitEnabled = watch("submitEnabled");
@@ -522,6 +538,38 @@ function CategoryEditDialog({
     setNewColumnName("");
   }
 
+  // Test connection handler
+  async function handleTestConnection() {
+    if (!editTarget) return;
+    if (!sheetId.trim() || !worksheetName.trim()) {
+      setTestStatus("error");
+      setTestMessage("❌ Please enter both Sheet ID and Worksheet Name before testing.");
+      return;
+    }
+    setTestStatus("loading");
+    setTestMessage("");
+    try {
+      const result = await testSheetConnection(editTarget.id, sheetId.trim(), worksheetName.trim());
+      setTestStatus("success");
+      setTestMessage(result.message);
+    } catch (err) {
+      setTestStatus("error");
+      setTestMessage((err as Error).message || "❌ Connection test failed");
+    }
+  }
+
+  // Wrap form submit to inject sheetConfig from local state
+  function handleInternalSubmit(formData: CategoryEditFormValues) {
+    onSubmit({
+      ...formData,
+      sheetConfig: {
+        sheetId: sheetId.trim(),
+        worksheetName: worksheetName.trim(),
+        columns,
+      },
+    });
+  }
+
   return (
     <Dialog
       open={!!editTarget}
@@ -541,7 +589,7 @@ function CategoryEditDialog({
           </DialogTitle>
         </DialogHeader>
 
-        <form id={EDIT_FORM_ID} onSubmit={handleSubmit(onSubmit)}>
+        <form id={EDIT_FORM_ID} onSubmit={handleSubmit(handleInternalSubmit)}>
           <Tabs defaultValue="general" className="w-full">
             {/* Tab bar */}
             <div className="px-6 pt-4 border-b border-border">
@@ -771,7 +819,7 @@ function CategoryEditDialog({
                     <Input
                       id="edit-sheetId"
                       value={sheetId}
-                      onChange={(e) => setSheetId(e.target.value)}
+                      onChange={(e) => { setSheetId(e.target.value); setTestStatus("idle"); }}
                       placeholder="e.g. 1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms"
                     />
                     <p className="text-xs text-muted-foreground">
@@ -785,9 +833,38 @@ function CategoryEditDialog({
                     <Input
                       id="edit-worksheetName"
                       value={worksheetName}
-                      onChange={(e) => setWorksheetName(e.target.value)}
+                      onChange={(e) => { setWorksheetName(e.target.value); setTestStatus("idle"); }}
                       placeholder="e.g. Sheet1"
                     />
+                  </div>
+
+                  {/* Test Connection */}
+                  <div className="flex flex-col gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={handleTestConnection}
+                      disabled={testStatus === "loading"}
+                      className="self-start"
+                    >
+                      {testStatus === "loading" ? (
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      ) : (
+                        <FileSpreadsheet className="h-4 w-4 mr-2" />
+                      )}
+                      Test Connection
+                    </Button>
+                    {testMessage && (
+                      <p
+                        className={`text-sm font-medium ${
+                          testStatus === "success"
+                            ? "text-green-600 dark:text-green-400"
+                            : "text-destructive"
+                        }`}
+                      >
+                        {testMessage}
+                      </p>
+                    )}
                   </div>
 
                   <Separator />
@@ -977,9 +1054,9 @@ export default function CategoriesPage() {
     createMutation.mutate(data);
   }
 
-  function handleEdit(data: CategoryEditFormValues) {
+  function handleEdit(data: CategoryEditSubmitData) {
     if (!editTarget) return;
-    // Strip UI-only fields before sending to API
+    // Strip UI-only fields before sending to API; sheetConfig is included
     const { categoryIcon: _icon, ...rest } = data;
     updateMutation.mutate({ id: editTarget.id, data: rest });
   }
