@@ -21,10 +21,7 @@ import { logger } from "../../core/logger";
 
 type SubmissionConversation = Conversation<PrimeEarnContext, Context>;
 
-/**
- * Returns true when the incoming update should immediately exit the
- * submission conversation: any Main Menu button, /start, or /cancel.
- */
+/** Returns true when the update should immediately exit the conversation. */
 function isEscapeUpdate(ctx: Context): boolean {
   const text = ctx.message?.text ?? "";
   const menuTexts = Object.values(MENU_BUTTONS) as string[];
@@ -33,6 +30,19 @@ function isEscapeUpdate(ctx: Context): boolean {
     text === "/cancel" ||
     menuTexts.includes(text) ||
     ctx.callbackQuery?.data === SUBMISSION_CB.CANCEL
+  );
+}
+
+/** Formats a processing / upload error into an inline-keyboard error screen. */
+function buildProcessErrorScreen(reason: string): string {
+  return (
+    "━━━━━━━━━━━━━━━━━━━━━\n" +
+    "❌  Upload Failed\n" +
+    "━━━━━━━━━━━━━━━━━━━━━\n\n" +
+    "Reason:\n" +
+    `${reason}\n\n` +
+    "Press ⬅️ Back to upload another file\n" +
+    "or ❌ Cancel to exit."
   );
 }
 
@@ -51,15 +61,15 @@ export function createSubmissionConversation(app: FirebaseApp, env: Env) {
     const telegramId = ctx.from.id;
     const chatId = ctx.chatId;
 
-    // Tracks the single navigation message that gets edited in-place throughout
-    // the flow. msgId = 0 means no message exists yet (or it was lost).
+    /**
+     * Single navigation message tracker.
+     * All screens edit this one message in-place via editMessageText.
+     */
     const nav = { msgId: 0 };
 
     /**
      * Edits the existing navigation message in-place.
-     * Falls back to sending a new message if:
-     *   - No nav message exists yet
-     *   - The previous message was deleted
+     * Creates a fresh message if none exists yet or if the previous one was deleted.
      */
     const showNav = async (
       text: string,
@@ -73,46 +83,40 @@ export function createSubmissionConversation(app: FirebaseApp, env: Env) {
           return;
         } catch (err: unknown) {
           const e = err as { error_code?: number; description?: string };
-          // "message is not modified" — identical content, nothing to do
           if (
             e.error_code === 400 &&
             e.description?.includes("message is not modified")
           ) {
-            return;
+            return; // identical content — nothing to do
           }
-          // Message was deleted or any other Telegram error — create a new one
-          nav.msgId = 0;
+          nav.msgId = 0; // message gone or other error — fall through
         }
       }
       const sent = await ctx.reply(text, { reply_markup: keyboard });
       nav.msgId = sent.message_id;
     };
 
-    // Clears our custom Firestore submission draft state.
     const clearState = () =>
       conversation.external(() =>
         stateManager.getStorage().deleteSubmissionFlow(chatId),
       );
 
     /**
-     * Called on any cancel/escape path.
-     * Removes the inline keyboard from the nav message (keeps the text),
-     * then sends a new message with the reply keyboard so the main menu is
-     * immediately accessible — identical to the original cancel behaviour.
+     * Removes the inline keyboard from the nav message then sends the cancel
+     * screen as a new reply so the main-menu reply keyboard is restored.
      */
     const handleCancel = async (triggerCtx: Context) => {
       await clearState();
       if (triggerCtx.callbackQuery) {
         await triggerCtx.answerCallbackQuery();
       }
-      // Remove inline keyboard from the nav message so it doesn't look stale
       if (nav.msgId) {
         try {
           await ctx.api.editMessageReplyMarkup(chatId, nav.msgId, {
             reply_markup: new InlineKeyboard(),
           });
         } catch {
-          // Ignore — message may already be gone
+          // ignore — message may already be gone
         }
       }
       await ctx.reply(
@@ -145,23 +149,18 @@ export function createSubmissionConversation(app: FirebaseApp, env: Env) {
       "📋  Select a Category\n\n" +
       "Choose a category below to start your submission:";
 
-    // ── Outer category loop — Back from Type Selection returns here ─────────
     const categoryRegex = new RegExp(`^${SUBMISSION_CB.CATEGORY_PREFIX}(.+)$`);
 
+    // ── Outer loop: Back from Type returns here ────────────────────────────
     categoryLoop: while (true) {
       await showNav(categorySelectionText, buildCategorySelectionKeyboard(categories));
 
-      // ── Category selection wait ──────────────────────────────────────────
       let selectedCategoryId = "";
       while (true) {
         const update = await conversation.wait();
+        if (isEscapeUpdate(update)) { await handleCancel(update); return; }
 
-        if (isEscapeUpdate(update)) {
-          await handleCancel(update);
-          return;
-        }
-
-        // Back on the first screen has no previous screen — treat as cancel
+        // Back on first screen = cancel (no previous screen)
         if (update.callbackQuery?.data === SUBMISSION_CB.BACK) {
           await update.answerCallbackQuery();
           await handleCancel(update);
@@ -174,8 +173,6 @@ export function createSubmissionConversation(app: FirebaseApp, env: Env) {
           selectedCategoryId = data.slice(SUBMISSION_CB.CATEGORY_PREFIX.length);
           break;
         }
-
-        // Unknown callback — acknowledge silently, no new message
         if (update.callbackQuery) await update.answerCallbackQuery();
       }
 
@@ -207,24 +204,18 @@ export function createSubmissionConversation(app: FirebaseApp, env: Env) {
         `🔍  Duplicate Check   ${category.duplicateCheck ? "Enabled" : "Disabled"}\n\n` +
         "Choose your submission type:";
 
-      // ── Type → Upload loop — Back from Upload returns here ─────────────
+      // ── Middle loop: Back from Upload returns here ─────────────────────
       typeUploadLoop: while (true) {
         await showNav(typePrompt, buildSubmissionTypeKeyboard(Boolean(recheckSource)));
 
-        // ── Submission type selection wait ───────────────────────────────
         let submissionTypeData = "";
         while (true) {
           const update = await conversation.wait();
+          if (isEscapeUpdate(update)) { await handleCancel(update); return; }
 
-          if (isEscapeUpdate(update)) {
-            await handleCancel(update);
-            return;
-          }
-
-          // Back from Type Selection → return to Category Selection
           if (update.callbackQuery?.data === SUBMISSION_CB.BACK) {
             await update.answerCallbackQuery();
-            continue categoryLoop;
+            continue categoryLoop; // Back → Category Selection
           }
 
           const data = update.callbackQuery?.data ?? "";
@@ -233,17 +224,19 @@ export function createSubmissionConversation(app: FirebaseApp, env: Env) {
             submissionTypeData = data;
             break;
           }
-
           if (update.callbackQuery) await update.answerCallbackQuery();
         }
 
         const isRecheck = submissionTypeData === SUBMISSION_CB.TYPE_RECHECK;
         if (isRecheck && !recheckSource) {
           await clearState();
-          await ctx.reply(
+          await showNav(
             "❌  Recheck submissions are not available for this category.",
-            { reply_markup: buildMainMenuKeyboard() },
+            new InlineKeyboard(),
           );
+          await ctx.reply("Use the Submit button to start again.", {
+            reply_markup: buildMainMenuKeyboard(),
+          });
           return;
         }
 
@@ -260,144 +253,157 @@ export function createSubmissionConversation(app: FirebaseApp, env: Env) {
           "  ✔  Format:    Excel (.xlsx only)\n" +
           "  ✔  Max size:  10 MB";
 
-        await showNav(uploadText, buildUploadKeyboard());
+        // ── Inner loop: Back from error screen returns here ──────────────
+        uploadLoop: while (true) {
+          await showNav(uploadText, buildUploadKeyboard());
 
-        // ── File upload wait ─────────────────────────────────────────────
-        let uploadedFileId = "";
-        let uploadedFileName = "";
+          // ── Wait for a valid file ──────────────────────────────────────
+          let uploadedFileId = "";
+          let uploadedFileName = "";
 
-        while (true) {
-          const update = await conversation.wait();
+          fileWait: while (true) {
+            const update = await conversation.wait();
+            if (isEscapeUpdate(update)) { await handleCancel(update); return; }
 
-          if (isEscapeUpdate(update)) {
-            await handleCancel(update);
-            return;
-          }
+            if (update.callbackQuery?.data === SUBMISSION_CB.BACK) {
+              await update.answerCallbackQuery();
+              continue typeUploadLoop; // Back → Type Selection
+            }
+            if (update.callbackQuery) {
+              await update.answerCallbackQuery();
+              continue fileWait;
+            }
 
-          // Back from Upload → return to Type Selection
-          if (update.callbackQuery?.data === SUBMISSION_CB.BACK) {
-            await update.answerCallbackQuery();
-            continue typeUploadLoop;
-          }
+            const doc = update.message?.document;
+            if (!doc) continue fileWait;
 
-          // Acknowledge any other callback silently
-          if (update.callbackQuery) {
-            await update.answerCallbackQuery();
-            continue;
-          }
+            const validation = validateSubmissionFile(doc, maxFileSize);
+            if (!validation.valid) {
+              await showNav(
+                "━━━━━━━━━━━━━━━━━━━━━\n" +
+                  "📎  Upload Your File\n" +
+                  "━━━━━━━━━━━━━━━━━━━━━\n\n" +
+                  `⚠️  ${validation.error ?? "Invalid file. Please upload a valid .xlsx file."}\n\n` +
+                  "  ✔  Format:    Excel (.xlsx only)\n" +
+                  "  ✔  Max size:  10 MB",
+                buildUploadKeyboard(),
+              );
+              continue fileWait;
+            }
 
-          const doc = update.message?.document;
-          if (!doc) {
-            // Non-document message — ignore silently
-            continue;
-          }
-
-          const validation = validateSubmissionFile(doc, maxFileSize);
-          if (!validation.valid) {
-            // Edit the nav message to show the error with the upload screen
-            await showNav(
-              "━━━━━━━━━━━━━━━━━━━━━\n" +
-                "📎  Upload Your File\n" +
-                "━━━━━━━━━━━━━━━━━━━━━\n\n" +
-                `⚠️  ${validation.error ?? "Invalid file. Please upload a valid .xlsx file."}\n\n` +
-                "  ✔  Format:    Excel (.xlsx only)\n" +
-                "  ✔  Max size:  10 MB",
-              buildUploadKeyboard(),
+            await conversation.external(() =>
+              stateManager.setFile(chatId, {
+                fileId: doc.file_id,
+                fileName: doc.file_name ?? "submission.xlsx",
+                fileSize: doc.file_size ?? null,
+                mimeType: doc.mime_type ?? null,
+              }),
             );
-            continue;
+            uploadedFileId = doc.file_id;
+            uploadedFileName = doc.file_name ?? "submission.xlsx";
+            break fileWait;
           }
 
-          await conversation.external(() =>
-            stateManager.setFile(chatId, {
-              fileId: doc.file_id,
-              fileName: doc.file_name ?? "submission.xlsx",
-              fileSize: doc.file_size ?? null,
-              mimeType: doc.mime_type ?? null,
-            }),
-          );
-          uploadedFileId = doc.file_id;
-          uploadedFileName = doc.file_name ?? "submission.xlsx";
-
-          // File accepted — show processing screen (edit nav message, no keyboard)
+          // ── Processing screen — edit nav message in-place ──────────────
           await conversation.external(() => stateManager.complete(chatId));
-
           await showNav(
             "━━━━━━━━━━━━━━━━━━━━━\n" +
               "⏳  Processing File\n" +
               "━━━━━━━━━━━━━━━━━━━━━\n\n" +
               "Your file is being processed.\n" +
-              "Please wait a moment...",
+              "Please wait...",
             new InlineKeyboard(),
           );
 
-          // ── Parse Excel ────────────────────────────────────────────────
-          let parsed: Awaited<ReturnType<typeof downloadAndParseExcel>>;
+          // ── Parse + submit — errors edit nav message and keep flow alive ─
+          type Parsed = Awaited<ReturnType<typeof downloadAndParseExcel>>;
+          type Submission = Awaited<ReturnType<typeof submissionService.validateAndCreate>>;
+
+          let parsed: Parsed | null = null;
+          let submission: Submission | null = null;
+          let processErrorMsg: string | null = null;
+
           try {
             parsed = await conversation.external(() =>
               downloadAndParseExcel(uploadedFileId, env.TELEGRAM_BOT_TOKEN),
             );
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
-            logger.error("Excel parse failed", { fileId: uploadedFileId, error: msg });
-            await clearState();
-            await ctx.reply(
-              "❌  Upload failed.\n\nPlease try again.",
-              { reply_markup: buildMainMenuKeyboard() },
-            );
-            return;
+            const stack = err instanceof Error ? err.stack : undefined;
+            logger.error("Submission upload failed", {
+              error: msg,
+              stack,
+              telegramId,
+              categoryId: category.id,
+            });
+            processErrorMsg = msg;
           }
 
-          const fileRef = `tg:${parsed.filePath}`;
-
-          // ── Create submission ──────────────────────────────────────────
-          let submission: Awaited<ReturnType<typeof submissionService.validateAndCreate>>;
-          try {
-            submission = await conversation.external(() =>
-              submissionService.validateAndCreate(
-                {
-                  telegramId,
-                  categoryId: category.id,
-                  categoryName: category.name,
-                  submissionType,
-                  fileName: uploadedFileName,
-                  fileUrl: fileRef,
-                  totalIds: parsed.totalIds,
-                  duplicateIds: parsed.duplicateIds,
-                  idList: parsed.uniqueIds,
-                  sourceSubmissionId: recheckSource?.id ?? null,
-                },
-                category,
-              ),
-            );
-          } catch (err) {
-            await clearState();
-            if (err instanceof ValidationError) {
-              await ctx.reply(
-                `❌  ${err.message}`,
-                { reply_markup: buildMainMenuKeyboard() },
+          if (parsed !== null) {
+            try {
+              submission = await conversation.external(() =>
+                submissionService.validateAndCreate(
+                  {
+                    telegramId,
+                    categoryId: category.id,
+                    categoryName: category.name,
+                    submissionType,
+                    fileName: uploadedFileName,
+                    fileUrl: `tg:${parsed!.filePath}`,
+                    totalIds: parsed!.totalIds,
+                    duplicateIds: parsed!.duplicateIds,
+                    idList: parsed!.uniqueIds,
+                    sourceSubmissionId: recheckSource?.id ?? null,
+                  },
+                  category,
+                ),
               );
-            } else {
-              const msg = err instanceof Error ? err.message : String(err);
-              logger.error("Submission creation failed", {
+            } catch (err) {
+              const msg =
+                err instanceof ValidationError
+                  ? err.message
+                  : err instanceof Error
+                    ? err.message
+                    : String(err);
+              const stack = err instanceof Error ? err.stack : undefined;
+              logger.error("Submission upload failed", {
+                error: msg,
+                stack,
                 telegramId,
                 categoryId: category.id,
-                error: msg,
               });
-              await ctx.reply(
-                "❌  Upload failed.\n\nPlease try again.",
-                { reply_markup: buildMainMenuKeyboard() },
-              );
+              processErrorMsg = msg;
             }
-            return;
           }
 
-          // ── Submission Report ──────────────────────────────────────────
+          // ── Error: show error screen, wait for Back or Cancel ───────────
+          if (parsed === null || submission === null) {
+            await showNav(
+              buildProcessErrorScreen(processErrorMsg ?? "Unknown error"),
+              buildUploadKeyboard(),
+            );
+
+            errorWait: while (true) {
+              const errUpdate = await conversation.wait();
+              if (isEscapeUpdate(errUpdate)) { await handleCancel(errUpdate); return; }
+              if (errUpdate.callbackQuery?.data === SUBMISSION_CB.BACK) {
+                await errUpdate.answerCallbackQuery();
+                continue uploadLoop; // Back → re-show upload screen
+              }
+              if (errUpdate.callbackQuery) await errUpdate.answerCallbackQuery();
+            }
+
+            // TypeScript: unreachable — errorWait only exits via continue/return
+            continue uploadLoop;
+          }
+
+          // ── Success: edit nav message to show Submission Report ─────────
           const invalidIds = Math.max(
             0,
             parsed.totalIds - parsed.duplicateIds - submission.oldIds - submission.validIds,
           );
 
-          await ctx.reply(
+          await showNav(
             "━━━━━━━━━━━━━━━━━━━━━\n" +
               "✅  Submission Received\n" +
               "━━━━━━━━━━━━━━━━━━━━━\n\n" +
@@ -413,7 +419,7 @@ export function createSubmissionConversation(app: FirebaseApp, env: Env) {
               `❌  Invalid IDs      ${invalidIds}\n\n` +
               "Your submission is now pending review.\n" +
               "You will be notified once it is processed.",
-            { reply_markup: buildMainMenuKeyboard() },
+            new InlineKeyboard(),
           );
 
           return;
