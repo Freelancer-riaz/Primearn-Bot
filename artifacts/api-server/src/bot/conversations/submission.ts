@@ -47,15 +47,20 @@ export function createSubmissionConversation(
       reply_markup: buildCategorySelectionKeyboard(categories),
     });
 
+    console.log("WAITING_FOR_CATEGORY");
     const categoryContext = await conversation.waitForCallbackQuery(
       new RegExp(`^${SUBMISSION_CB.CATEGORY_PREFIX}(.+)$`),
       {
         otherwise: async (otherContext) => {
-          await otherContext.answerCallbackQuery();
+          if (otherContext.callbackQuery) {
+            await otherContext.answerCallbackQuery();
+          }
           await otherContext.reply("Please select a category using the buttons above.");
         },
       },
     );
+    console.log("CATEGORY_CALLBACK_RECEIVED");
+    console.log("callbackQuery.data:", categoryContext.callbackQuery.data);
     await categoryContext.answerCallbackQuery();
 
     const categoryId = categoryContext.callbackQuery.data.slice(
@@ -93,7 +98,9 @@ export function createSubmissionConversation(
       [SUBMISSION_CB.TYPE_NORMAL, SUBMISSION_CB.TYPE_RECHECK],
       {
         otherwise: async (otherContext) => {
-          await otherContext.answerCallbackQuery();
+          if (otherContext.callbackQuery) {
+            await otherContext.answerCallbackQuery();
+          }
           await otherContext.reply("Please choose Normal or Recheck Submission.");
         },
       },

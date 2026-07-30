@@ -7,6 +7,7 @@ export function createSubmissionMiddleware() {
   return async (ctx: Context, next: NextFunction): Promise<void> => {
     const data = ctx.callbackQuery?.data;
     if (!data?.startsWith("submit:")) return next();
+    console.log("SUBMISSION_MIDDLEWARE: callback data received:", data);
 
     if (
       CATEGORY_CALLBACK.test(data) ||
