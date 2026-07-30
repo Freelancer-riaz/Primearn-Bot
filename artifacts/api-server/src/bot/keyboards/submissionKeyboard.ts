@@ -16,7 +16,7 @@ export function buildCategorySelectionKeyboard(
   categories.forEach((category) => {
     keyboard.text(`📂 ${category.name}`, `${SUBMISSION_CB.CATEGORY_PREFIX}${category.id}`).row();
   });
-  keyboard.text("❌ Cancel", SUBMISSION_CB.CANCEL);
+  keyboard.text("⬅️ Back", SUBMISSION_CB.BACK).text("❌ Cancel", SUBMISSION_CB.CANCEL);
   return keyboard;
 }
 
@@ -30,7 +30,7 @@ export function buildSubmissionTypeKeyboard(
   if (allowRecheck) {
     keyboard.row().text("🔁 Recheck Submission", SUBMISSION_CB.TYPE_RECHECK);
   }
-  keyboard.row().text("❌ Cancel", SUBMISSION_CB.CANCEL);
+  keyboard.row().text("⬅️ Back", SUBMISSION_CB.BACK).text("❌ Cancel", SUBMISSION_CB.CANCEL);
   return keyboard;
 }
 
