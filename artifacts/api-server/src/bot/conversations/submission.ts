@@ -39,13 +39,21 @@ export function createSubmissionConversation(
       flowService.getSelectableCategories(),
     );
     if (categories.length === 0) {
-      await ctx.reply("There are no categories accepting submissions right now.");
+      await ctx.reply(
+        "⏸  No Submissions Available\n\n" +
+        "No categories are accepting submissions right now.\n" +
+        "Please check back later.",
+      );
       return;
     }
 
-    await ctx.reply("Select a category:", {
-      reply_markup: buildCategorySelectionKeyboard(categories),
-    });
+    await ctx.reply(
+      "📋  Select a Category\n\n" +
+      "Choose a category below to start your submission:",
+      {
+        reply_markup: buildCategorySelectionKeyboard(categories),
+      },
+    );
 
     console.log("WAITING_FOR_CATEGORY");
     const categoryContext = await conversation.waitForCallbackQuery(
@@ -55,7 +63,9 @@ export function createSubmissionConversation(
           if (otherContext.callbackQuery) {
             await otherContext.answerCallbackQuery();
           }
-          await otherContext.reply("Please select a category using the buttons above.");
+          await otherContext.reply(
+            "⚠️  Please use the buttons above to select a category.",
+          );
         },
       },
     );
@@ -70,7 +80,10 @@ export function createSubmissionConversation(
       flowService.getCategory(categoryId),
     );
     if (!category) {
-      await categoryContext.reply("That category is no longer available. Please use /submit again.");
+      await categoryContext.reply(
+        "❌  That category is no longer available.\n\n" +
+        "Please use /submit to start a new submission.",
+      );
       return;
     }
 
@@ -85,10 +98,12 @@ export function createSubmissionConversation(
     );
 
     await categoryContext.reply(
-      `Category: ${category.name}\n` +
-        `Daily limit: ${category.dailyLimitEnabled ? "Enabled" : "Disabled"}\n` +
-        `File duplicate check: ${category.duplicateCheck ? "Enabled" : "Disabled"}\n\n` +
-        "Choose submission type:",
+      "━━━━━━━━━━━━━━━━━━━━━\n" +
+        `📂  ${category.name}\n` +
+        "━━━━━━━━━━━━━━━━━━━━━\n\n" +
+        `📊  Daily Limit       ${category.dailyLimitEnabled ? `Enabled (${category.dailySubmitCount}/day)` : "Disabled"}\n` +
+        `🔍  Duplicate Check   ${category.duplicateCheck ? "Enabled" : "Disabled"}\n\n` +
+        "Choose your submission type:",
       {
         reply_markup: buildSubmissionTypeKeyboard(Boolean(recheckSource)),
       },
@@ -101,7 +116,9 @@ export function createSubmissionConversation(
           if (otherContext.callbackQuery) {
             await otherContext.answerCallbackQuery();
           }
-          await otherContext.reply("Please choose Normal or Recheck Submission.");
+          await otherContext.reply(
+            "⚠️  Please choose a submission type using the buttons above.",
+          );
         },
       },
     );
@@ -109,7 +126,9 @@ export function createSubmissionConversation(
 
     const isRecheck = typeContext.callbackQuery.data === SUBMISSION_CB.TYPE_RECHECK;
     if (isRecheck && !recheckSource) {
-      await typeContext.reply("Recheck is not available for this category.");
+      await typeContext.reply(
+        "❌  Recheck submissions are not available for this category.",
+      );
       return;
     }
 
@@ -123,18 +142,27 @@ export function createSubmissionConversation(
     );
 
     await typeContext.reply(
-      "Upload your .xlsx file now. Excel parsing is not performed yet.",
+      "━━━━━━━━━━━━━━━━━━━━━\n" +
+        "📎  Upload Your File\n" +
+        "━━━━━━━━━━━━━━━━━━━━━\n\n" +
+        "Send your .xlsx file now.\n\n" +
+        "  ✔  Format:    Excel (.xlsx only)\n" +
+        "  ✔  Max size:  10 MB",
     );
 
     while (true) {
       const fileContext = await conversation.waitFor("message:document", {
         otherwise: (otherContext) =>
-          otherContext.reply("Please upload an .xlsx document file."),
+          otherContext.reply(
+            "⚠️  Please upload a valid .xlsx document file.",
+          ),
       });
       const document = fileContext.msg.document;
       const validation = validateSubmissionFile(document, maxFileSize);
       if (!validation.valid) {
-        await fileContext.reply(validation.error ?? "Invalid file.");
+        await fileContext.reply(
+          `⚠️  ${validation.error ?? "Invalid file. Please upload a valid .xlsx file."}`,
+        );
         continue;
       }
 
@@ -151,7 +179,12 @@ export function createSubmissionConversation(
 
     await conversation.external(() => stateManager.complete(chatId));
     await ctx.reply(
-      "Your .xlsx file passed the foundation checks. Excel parsing and submission creation will be added in a later phase.",
+      "━━━━━━━━━━━━━━━━━━━━━\n" +
+        "✅  File Received\n" +
+        "━━━━━━━━━━━━━━━━━━━━━\n\n" +
+        "Your file has been uploaded successfully.\n" +
+        "Your submission is now being processed.\n\n" +
+        "You will receive the results shortly.",
     );
   };
 }

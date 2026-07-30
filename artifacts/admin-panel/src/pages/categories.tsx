@@ -1114,67 +1114,134 @@ export default function CategoriesPage() {
         </div>
       )}
 
-      {/* Table */}
+      {/* Category Cards */}
       {!isLoading && !isError && categories && categories.length > 0 && (
-        <div className="bg-card border border-border rounded-xl shadow-sm overflow-hidden">
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Description</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Submit Enabled</TableHead>
-                  <TableHead className="text-right">Price / Good ID</TableHead>
-                  <TableHead className="text-right">Order</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {categories.map((cat) => (
-                  <TableRow key={cat.id}>
-                    <TableCell className="font-medium">{cat.name}</TableCell>
-                    <TableCell className="text-muted-foreground max-w-[200px] truncate">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+          {categories.map((cat) => (
+            <div
+              key={cat.id}
+              className="bg-card border border-border rounded-xl shadow-sm overflow-hidden flex flex-col transition-shadow hover:shadow-md"
+            >
+              {/* Card Header */}
+              <div className="flex items-start justify-between gap-3 px-5 pt-5 pb-4">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <span
+                      className={`inline-block w-2 h-2 rounded-full flex-shrink-0 ${
+                        cat.status === "active"
+                          ? "bg-emerald-500"
+                          : "bg-slate-400"
+                      }`}
+                    />
+                    <h3 className="font-semibold text-foreground text-[15px] leading-tight truncate">
+                      {cat.name}
+                    </h3>
+                  </div>
+                  {cat.description && (
+                    <p className="text-xs text-muted-foreground leading-relaxed line-clamp-2 pl-4">
                       {cat.description}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={cat.status === "active" ? "default" : "secondary"}>
-                        {cat.status}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={cat.submitEnabled ? "default" : "secondary"}>
-                        {cat.submitEnabled ? "Yes" : "No"}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-right">{cat.pricePerGoodId}</TableCell>
-                    <TableCell className="text-right">{cat.displayOrder}</TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => setEditTarget(cat)}
-                          aria-label={`Edit ${cat.name}`}
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => setDeleteTarget(cat)}
-                          aria-label={`Delete ${cat.name}`}
-                          className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
+                    </p>
+                  )}
+                </div>
+                <div className="flex-shrink-0 text-right">
+                  <p className="text-xl font-bold text-foreground leading-none">
+                    {cat.pricePerGoodId}
+                  </p>
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide mt-0.5">
+                    per ID
+                  </p>
+                </div>
+              </div>
+
+              <Separator />
+
+              {/* Status Badges */}
+              <div className="flex flex-wrap items-center gap-1.5 px-5 py-3">
+                <Badge
+                  variant="outline"
+                  className={
+                    cat.status === "active"
+                      ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-400 dark:border-emerald-800"
+                      : "border-border bg-muted text-muted-foreground"
+                  }
+                >
+                  <span
+                    className={`mr-1.5 inline-block w-1.5 h-1.5 rounded-full ${
+                      cat.status === "active" ? "bg-emerald-500" : "bg-slate-400"
+                    }`}
+                  />
+                  {cat.status === "active" ? "Active" : "Inactive"}
+                </Badge>
+                <Badge
+                  variant="outline"
+                  className={
+                    cat.submitEnabled
+                      ? "border-blue-200 bg-blue-50 text-blue-700 dark:bg-blue-950/30 dark:text-blue-400 dark:border-blue-800"
+                      : "border-border bg-muted text-muted-foreground"
+                  }
+                >
+                  {cat.submitEnabled ? "Submit Open" : "Submit Closed"}
+                </Badge>
+                {cat.dailyLimitEnabled && (
+                  <Badge variant="outline" className="text-muted-foreground">
+                    {cat.dailySubmitCount}/day
+                  </Badge>
+                )}
+              </div>
+
+              {/* Stats Row */}
+              <div className="grid grid-cols-3 divide-x divide-border border-t border-border">
+                <div className="px-3 py-2.5 text-center">
+                  <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide mb-0.5">
+                    Window
+                  </p>
+                  <p className="text-xs font-semibold text-foreground tabular-nums">
+                    {cat.submitStartTime}–{cat.submitEndTime}
+                  </p>
+                </div>
+                <div className="px-3 py-2.5 text-center">
+                  <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide mb-0.5">
+                    IDs
+                  </p>
+                  <p className="text-xs font-semibold text-foreground tabular-nums">
+                    {cat.minIds}–{cat.maxIds}
+                  </p>
+                </div>
+                <div className="px-3 py-2.5 text-center">
+                  <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide mb-0.5">
+                    Order
+                  </p>
+                  <p className="text-xs font-semibold text-foreground tabular-nums">
+                    {cat.displayOrder}
+                  </p>
+                </div>
+              </div>
+
+              {/* Actions */}
+              <div className="flex items-center justify-end gap-1 px-4 py-2.5 border-t border-border bg-muted/30">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setEditTarget(cat)}
+                  aria-label={`Edit ${cat.name}`}
+                  className="h-8 px-3 text-xs gap-1.5 text-muted-foreground hover:text-foreground"
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                  Edit
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setDeleteTarget(cat)}
+                  aria-label={`Delete ${cat.name}`}
+                  className="h-8 px-3 text-xs gap-1.5 text-destructive hover:text-destructive hover:bg-destructive/10"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  Delete
+                </Button>
+              </div>
+            </div>
+          ))}
         </div>
       )}
 

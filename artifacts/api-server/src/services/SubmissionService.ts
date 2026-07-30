@@ -236,12 +236,13 @@ export class SubmissionService {
   }
 
   /**
-   * Throws if the user has already reached the daily accepted-submission limit
-   * for this category (Asia/Dhaka calendar day, resets at 00:00 Asia/Dhaka).
+   * Throws if the user has already reached the daily submission limit for this
+   * category (Asia/Dhaka calendar day, resets at 00:00 Asia/Dhaka).
    *
-   * Only SUCCESSFUL (reportStatus === "accepted") submissions are counted.
-   * Validation failures, upload failures, cancelled, and rejected submissions
-   * are NOT counted.
+   * Counted immediately on creation — does NOT wait for admin acceptance.
+   * Any submission that reached Firestore counts. Only submissions that never
+   * reached Firestore (failed validation, upload failures, cancellations) are
+   * excluded naturally.
    *
    * If dailyLimitEnabled is false the check is skipped (unlimited submissions).
    */
@@ -252,7 +253,7 @@ export class SubmissionService {
     if (!category.dailyLimitEnabled) return;
 
     const { start, end } = this.dhakaDayBoundsUTC();
-    const count = await this.repo.countAcceptedSubmissionsToday(
+    const count = await this.repo.countCreatedSubmissionsToday(
       telegramId,
       category.id,
       start,

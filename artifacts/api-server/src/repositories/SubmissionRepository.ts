@@ -85,15 +85,19 @@ export class SubmissionRepository {
   }
 
   /**
-   * Count accepted submissions for a user + category within a UTC time window.
-   * Used for the Asia/Dhaka daily submission limit check.
+   * Count all successfully created submissions for a user + category within a
+   * UTC time window. Used for the Asia/Dhaka daily submission limit check.
    *
-   * Requires composite index: (telegramId, categoryId, reportStatus, createdAt).
+   * A submission counts as soon as it is created in Firestore — regardless of
+   * status or reportStatus. Only records that never reached Firestore (failed
+   * validation, upload failures, cancellations) are excluded naturally.
+   *
+   * Requires composite index: (telegramId, categoryId, createdAt).
    *
    * @param startUTC - ISO 8601 string: start of the Dhaka day expressed in UTC (inclusive)
    * @param endUTC   - ISO 8601 string: start of the next Dhaka day expressed in UTC (exclusive)
    */
-  async countAcceptedSubmissionsToday(
+  async countCreatedSubmissionsToday(
     telegramId: number,
     categoryId: string,
     startUTC: string,
@@ -102,7 +106,6 @@ export class SubmissionRepository {
     const snap = await this.col()
       .where("telegramId", "==", telegramId)
       .where("categoryId", "==", categoryId)
-      .where("reportStatus", "==", "accepted")
       .where("createdAt", ">=", startUTC)
       .where("createdAt", "<", endUTC)
       .get();
