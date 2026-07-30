@@ -363,32 +363,35 @@ function CategoryForm({
             />
           </div>
 
-          {/* Min / Max IDs */}
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-1.5">
-              <Label htmlFor={`${formId}-minIds`}>Min IDs</Label>
-              <Input
-                id={`${formId}-minIds`}
-                type="number"
-                min={0}
-                {...register("minIds")}
-              />
-              {errors.minIds && (
-                <p className="text-xs text-destructive">{errors.minIds.message}</p>
-              )}
-            </div>
+          {/* Upload ID Limit */}
+          <div>
+            <p className="text-sm font-medium mb-3">Upload ID Limit</p>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label htmlFor={`${formId}-minIds`}>Minimum IDs per Upload</Label>
+                <Input
+                  id={`${formId}-minIds`}
+                  type="number"
+                  min={0}
+                  {...register("minIds")}
+                />
+                {errors.minIds && (
+                  <p className="text-xs text-destructive">{errors.minIds.message}</p>
+                )}
+              </div>
 
-            <div className="space-y-1.5">
-              <Label htmlFor={`${formId}-maxIds`}>Max IDs</Label>
-              <Input
-                id={`${formId}-maxIds`}
-                type="number"
-                min={0}
-                {...register("maxIds")}
-              />
-              {errors.maxIds && (
-                <p className="text-xs text-destructive">{errors.maxIds.message}</p>
-              )}
+              <div className="space-y-1.5">
+                <Label htmlFor={`${formId}-maxIds`}>Maximum IDs per Upload</Label>
+                <Input
+                  id={`${formId}-maxIds`}
+                  type="number"
+                  min={0}
+                  {...register("maxIds")}
+                />
+                {errors.maxIds && (
+                  <p className="text-xs text-destructive">{errors.maxIds.message}</p>
+                )}
+              </div>
             </div>
           </div>
 
@@ -801,6 +804,39 @@ function CategoryEditDialog({
                     </div>
                   </div>
 
+                  <Separator />
+
+                  {/* Upload ID Limit */}
+                  <div>
+                    <p className="text-sm font-medium mb-3">Upload ID Limit</p>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1.5">
+                        <Label htmlFor="edit-minIds">Minimum IDs per Upload</Label>
+                        <Input
+                          id="edit-minIds"
+                          type="number"
+                          min={0}
+                          {...register("minIds")}
+                        />
+                        {errors.minIds && (
+                          <p className="text-xs text-destructive">{errors.minIds.message}</p>
+                        )}
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="edit-maxIds">Maximum IDs per Upload</Label>
+                        <Input
+                          id="edit-maxIds"
+                          type="number"
+                          min={0}
+                          {...register("maxIds")}
+                        />
+                        {errors.maxIds && (
+                          <p className="text-xs text-destructive">{errors.maxIds.message}</p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
                 </div>
             </TabsContent>
 
@@ -1201,7 +1237,7 @@ export default function CategoriesPage() {
                 </div>
                 <div className="px-3 py-2.5 text-center">
                   <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide mb-0.5">
-                    IDs
+                    Upload Limit
                   </p>
                   <p className="text-xs font-semibold text-foreground tabular-nums">
                     {cat.minIds}–{cat.maxIds}

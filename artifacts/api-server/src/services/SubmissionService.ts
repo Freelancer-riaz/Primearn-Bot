@@ -46,7 +46,9 @@ export class SubmissionService {
     this.validateSubmitEnabled(category);
     this.validateRecheckEnabled(req.submissionType, category);
     this.validateSubmitTimeWindow(category);
-    this.validateIdCount(req.totalIds, category);
+
+    const validIds = Math.max(0, req.totalIds - req.duplicateIds);
+    this.validateIdCount(validIds, category);
 
     const today = this.todayUTC();
 
@@ -59,8 +61,6 @@ export class SubmissionService {
         req.categoryId,
       );
     }
-
-    const validIds = Math.max(0, req.totalIds - req.duplicateIds);
 
     logger.info("Creating submission", {
       telegramId: req.telegramId,
@@ -221,16 +221,20 @@ export class SubmissionService {
     }
   }
 
-  /** Throws if totalIds is outside the category's min/max range. */
-  private validateIdCount(totalIds: number, category: Category): void {
-    if (totalIds < category.minIds) {
+  /**
+   * Throws if validIds (total minus duplicates) falls outside the category's
+   * configured upload ID range. Called after validIds is computed so only
+   * genuine IDs count toward the limit.
+   */
+  private validateIdCount(validIds: number, category: Category): void {
+    if (validIds < category.minIds) {
       throw new ValidationError(
-        `Minimum ${category.minIds} IDs required; you provided ${totalIds}.`,
+        `❌ Minimum upload limit not reached.\n\nMinimum Required:\n${category.minIds} IDs\n\nYour File:\n${validIds} IDs`,
       );
     }
-    if (totalIds > category.maxIds) {
+    if (validIds > category.maxIds) {
       throw new ValidationError(
-        `Maximum ${category.maxIds} IDs allowed; you provided ${totalIds}.`,
+        `❌ Maximum upload limit exceeded.\n\nMaximum Allowed:\n${category.maxIds} IDs\n\nYour File:\n${validIds} IDs`,
       );
     }
   }
