@@ -33,14 +33,26 @@ function isEscapeUpdate(ctx: Context): boolean {
   );
 }
 
-/** Formats a processing / upload error into an inline-keyboard error screen. */
-function buildProcessErrorScreen(reason: string): string {
+/**
+ * Formats a ValidationError message (already fully formatted) by appending
+ * the Back / Cancel footer so the user knows how to proceed.
+ */
+function buildValidationErrorScreen(formattedMessage: string): string {
+  return (
+    formattedMessage +
+    "\n\n" +
+    "Press ⬅️ Back to upload another file\n" +
+    "or ❌ Cancel to exit."
+  );
+}
+
+/** Formats an unexpected (non-validation) error into a generic error screen. */
+function buildUnexpectedErrorScreen(): string {
   return (
     "━━━━━━━━━━━━━━━━━━━━━\n" +
     "❌  Upload Failed\n" +
     "━━━━━━━━━━━━━━━━━━━━━\n\n" +
-    "Reason:\n" +
-    `${reason}\n\n` +
+    "Something went wrong while processing your file.\n\n" +
     "Press ⬅️ Back to upload another file\n" +
     "or ❌ Cancel to exit."
   );
@@ -100,6 +112,18 @@ export function createSubmissionConversation(app: FirebaseApp, env: Env) {
       conversation.external(() =>
         stateManager.getStorage().deleteSubmissionFlow(chatId),
       );
+
+    /** Shows a temporary loading screen in the nav message while processing. */
+    const showLoading = async (): Promise<void> => {
+      await showNav(
+        "━━━━━━━━━━━━━━━━━━━━━\n" +
+          "⏳  Loading...\n" +
+          "━━━━━━━━━━━━━━━━━━━━━\n\n" +
+          "Please wait...\n\n" +
+          "Processing your request...",
+        new InlineKeyboard(),
+      );
+    };
 
     /**
      * Removes the inline keyboard from the nav message then sends the cancel
@@ -171,6 +195,7 @@ export function createSubmissionConversation(app: FirebaseApp, env: Env) {
         if (categoryRegex.test(data)) {
           await update.answerCallbackQuery();
           selectedCategoryId = data.slice(SUBMISSION_CB.CATEGORY_PREFIX.length);
+          await showLoading();
           break;
         }
         if (update.callbackQuery) await update.answerCallbackQuery();
@@ -222,6 +247,7 @@ export function createSubmissionConversation(app: FirebaseApp, env: Env) {
           if (data === SUBMISSION_CB.TYPE_NORMAL || data === SUBMISSION_CB.TYPE_RECHECK) {
             await update.answerCallbackQuery();
             submissionTypeData = data;
+            await showLoading();
             break;
           }
           if (update.callbackQuery) await update.answerCallbackQuery();
@@ -281,11 +307,11 @@ export function createSubmissionConversation(app: FirebaseApp, env: Env) {
             if (!validation.valid) {
               await showNav(
                 "━━━━━━━━━━━━━━━━━━━━━\n" +
-                  "📎  Upload Your File\n" +
+                  "❌  Invalid Excel File\n" +
                   "━━━━━━━━━━━━━━━━━━━━━\n\n" +
-                  `⚠️  ${validation.error ?? "Invalid file. Please upload a valid .xlsx file."}\n\n` +
-                  "  ✔  Format:    Excel (.xlsx only)\n" +
-                  "  ✔  Max size:  10 MB",
+                  `${validation.error ?? "Please upload a valid .xlsx file."}\n\n` +
+                  "Press ⬅️ Back to go back\n" +
+                  "or send a valid .xlsx file to try again.",
                 buildUploadKeyboard(),
               );
               continue fileWait;
@@ -349,6 +375,7 @@ export function createSubmissionConversation(app: FirebaseApp, env: Env) {
           let parsed: Parsed | null = null;
           let submission: Submission | null = null;
           let processErrorMsg: string | null = null;
+          let isValidationError = false;
 
           try {
             parsed = await conversation.external(() =>
@@ -386,29 +413,28 @@ export function createSubmissionConversation(app: FirebaseApp, env: Env) {
                 ),
               );
             } catch (err) {
-              const msg =
-                err instanceof ValidationError
-                  ? err.message
-                  : err instanceof Error
-                    ? err.message
-                    : String(err);
               const stack = err instanceof Error ? err.stack : undefined;
+              if (err instanceof ValidationError) {
+                isValidationError = true;
+                processErrorMsg = err.message;
+              } else {
+                processErrorMsg = err instanceof Error ? err.message : String(err);
+              }
               logger.error("Submission upload failed", {
-                error: msg,
+                error: processErrorMsg,
                 stack,
                 telegramId,
                 categoryId: category.id,
               });
-              processErrorMsg = msg;
             }
           }
 
           // ── Error: edit status message with error + Back/Cancel ──────────
           if (parsed === null || submission === null) {
-            await editStatus(
-              buildProcessErrorScreen(processErrorMsg ?? "Unknown error"),
-              buildUploadKeyboard(),
-            );
+            const errorScreen = isValidationError
+              ? buildValidationErrorScreen(processErrorMsg ?? "Unknown error")
+              : buildUnexpectedErrorScreen();
+            await editStatus(errorScreen, buildUploadKeyboard());
 
             errorWait: while (true) {
               const errUpdate = await conversation.wait();

@@ -90,7 +90,11 @@ export class SubmissionService {
       validIds,
       minimumRequired: category.minIds,
     });
-    this.validateIdCount(validIds, category);
+    this.validateIdCount(validIds, category, {
+      totalIds: req.totalIds,
+      duplicateIds: req.duplicateIds,
+      oldIdCount,
+    });
 
     const today = this.todayUTC();
 
@@ -284,15 +288,66 @@ export class SubmissionService {
    * configured upload ID range. Called after validIds is computed so only
    * genuine IDs count toward the limit.
    */
-  private validateIdCount(validIds: number, category: Category): void {
-    if (validIds < category.minIds) {
+  private validateIdCount(
+    validIds: number,
+    category: Category,
+    context: { totalIds: number; duplicateIds: number; oldIdCount: number },
+  ): void {
+    const { totalIds, duplicateIds, oldIdCount } = context;
+    const newIds = validIds;
+
+    const fileSummary =
+      `• Total IDs          ${totalIds}\n` +
+      `• Duplicate IDs      ${duplicateIds}\n` +
+      `• Old IDs            ${oldIdCount}\n` +
+      `• New IDs            ${newIds}`;
+
+    // Rule 5 (priority 2): No IDs found in the file
+    if (totalIds === 0) {
       throw new ValidationError(
-        `❌ Minimum upload limit not reached.\n\nMinimum Required:\n${category.minIds} IDs\n\nYour File:\n${validIds} IDs`,
+        "━━━━━━━━━━━━━━━━━━━━━\n" +
+          "❌  No IDs Found\n" +
+          "━━━━━━━━━━━━━━━━━━━━━\n\n" +
+          "No valid IDs were found in Column A.",
       );
     }
+
+    // Rule 1 (priority 3): All IDs in the file were already submitted before
+    if (oldIdCount === totalIds - duplicateIds || (validIds === 0 && oldIdCount > 0)) {
+      throw new ValidationError(
+        "━━━━━━━━━━━━━━━━━━━━━\n" +
+          "⚠️  Upload Rejected\n" +
+          "━━━━━━━━━━━━━━━━━━━━━\n\n" +
+          "All IDs in your file were already submitted before.\n\n" +
+          "📄  File Summary\n\n" +
+          fileSummary + "\n\n" +
+          "Please upload a file containing new IDs.",
+      );
+    }
+
+    // Rule 2 (priority 4): Not enough new IDs
+    if (validIds < category.minIds) {
+      throw new ValidationError(
+        "━━━━━━━━━━━━━━━━━━━━━\n" +
+          "⚠️  Upload Rejected\n" +
+          "━━━━━━━━━━━━━━━━━━━━━\n\n" +
+          "Not enough NEW IDs.\n\n" +
+          "📄  File Summary\n\n" +
+          fileSummary + "\n\n" +
+          `Minimum Required:\n${category.minIds} IDs`,
+      );
+    }
+
+    // Rule 3 (priority 5): Too many new IDs
     if (validIds > category.maxIds) {
       throw new ValidationError(
-        `❌ Maximum upload limit exceeded.\n\nMaximum Allowed:\n${category.maxIds} IDs\n\nYour File:\n${validIds} IDs`,
+        "━━━━━━━━━━━━━━━━━━━━━\n" +
+          "⚠️  Upload Rejected\n" +
+          "━━━━━━━━━━━━━━━━━━━━━\n\n" +
+          "Too many NEW IDs.\n\n" +
+          "📄  File Summary\n\n" +
+          fileSummary + "\n\n" +
+          `Maximum Allowed:\n${category.maxIds} IDs`,
       );
     }
   }
