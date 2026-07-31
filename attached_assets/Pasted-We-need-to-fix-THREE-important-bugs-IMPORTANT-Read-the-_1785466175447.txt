@@ -1,0 +1,248 @@
+We need to fix THREE important bugs.
+
+⚠️ IMPORTANT
+
+Read the entire prompt carefully before making any changes.
+
+DO NOT rewrite the submission system.
+
+DO NOT change business logic.
+
+DO NOT change duplicate detection.
+
+DO NOT change old ID detection.
+
+DO NOT change Firestore architecture.
+
+DO NOT change report structure.
+
+Only fix the bugs below.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+BUG #1
+Meaningful Upload Errors
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Current problem:
+
+Every upload error becomes
+
+━━━━━━━━━━━━━━━━━━━━━
+❌ Upload Failed
+━━━━━━━━━━━━━━━━━━━━━
+
+Something went wrong while processing your file.
+
+This is WRONG.
+
+Only unexpected exceptions should show this generic message.
+
+Validation errors MUST keep their original formatted message.
+
+Examples:
+
+✔ Invalid Excel File
+
+✔ No IDs Found
+
+✔ All IDs Already Submitted
+
+✔ Not Enough NEW IDs
+
+✔ Too Many NEW IDs
+
+These messages are already generated inside SubmissionService.
+
+DO NOT replace them.
+
+Display them exactly as they are.
+
+Only real unexpected exceptions should display
+
+━━━━━━━━━━━━━━━━━━━━━
+❌ Upload Failed
+━━━━━━━━━━━━━━━━━━━━━
+
+Something went wrong while processing your file.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+BUG #2
+Professional Loading Experience
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Current problem:
+
+Only submission upload shows loading.
+
+This is NOT enough.
+
+Loading must work for EVERY callback button.
+
+Examples:
+
+• Category
+
+• Submission
+
+• Profile
+
+• Wallet
+
+• Withdraw
+
+• Reports
+
+• History
+
+• Settings
+
+• Admin
+
+• Back
+
+• Cancel
+
+• Every Inline Keyboard Button
+
+Expected Flow:
+
+User presses button
+
+↓
+
+Immediately execute
+
+answerCallbackQuery()
+
+↓
+
+Instantly show a SMALL loading status.
+
+Example:
+
+⏳ Loading...
+
+Please wait...
+
+↓
+
+Process request
+
+↓
+
+Replace ONLY the loading status
+
+with
+
+• Next page
+
+or
+
+• Success screen
+
+or
+
+• Error screen
+
+DO NOT create full screen loading.
+
+DO NOT make users wait with no feedback.
+
+Every callback button must feel responsive.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+BUG #3
+Daily Submission Limit
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Current problem:
+
+Daily Submission Limit is Enabled.
+
+Limit = 1
+
+User uploads one file successfully.
+
+Submission is immediately saved into Firestore.
+
+But the same user can upload another file again.
+
+This is WRONG.
+
+Expected behaviour:
+
+Before creating ANY submission,
+
+count today's submissions using
+
+telegramId
+
++
+
+categoryId
+
++
+
+today's date
+
+If today's submission count is greater than or equal to the configured Daily Limit,
+
+STOP immediately.
+
+DO NOT continue processing.
+
+DO NOT save another submission.
+
+Show:
+
+━━━━━━━━━━━━━━━━━━━━━
+⚠️ Daily Upload Limit Reached
+━━━━━━━━━━━━━━━━━━━━━
+
+You have already used today's upload limit for this category.
+
+Please try again tomorrow.
+
+IMPORTANT:
+
+Since submissions are saved immediately,
+
+DO NOT depend on pending status.
+
+DO NOT depend on accepted status.
+
+Simply count today's saved submissions.
+
+Find the ROOT CAUSE of why the current Daily Limit check is failing.
+
+Fix the root cause.
+
+Do NOT hardcode anything.
+
+Use the existing category configuration.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FINAL REQUIREMENTS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✔ Keep all existing features working.
+
+✔ Do NOT break upload flow.
+
+✔ Do NOT break duplicate detection.
+
+✔ Do NOT break old ID detection.
+
+✔ Do NOT break report generation.
+
+✔ Run:
+
+pnpm typecheck
+
+If typecheck passes,
+
+Commit:
+
+Fix upload validation, global callback loading and daily upload limit
+
+Push to GitHub main branch.
