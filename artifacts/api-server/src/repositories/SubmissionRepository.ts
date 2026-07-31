@@ -99,14 +99,19 @@ export class SubmissionRepository {
     telegramId: number,
     categoryId: string,
     date: string,
-  ): Promise<number> {
+  ): Promise<{ count: number; docs: Array<{ id: string; submitDate: unknown; submissionType: unknown }> }> {
     const snap = await this.col()
       .where("telegramId", "==", telegramId)
       .where("categoryId", "==", categoryId)
       .where("submitDate", "==", date)
       .where("submissionType", "==", "normal")
       .get();
-    return snap.docs.length;
+    const docs = snap.docs.map((d) => ({
+      id: d.id,
+      submitDate: d.data()["submitDate"],
+      submissionType: d.data()["submissionType"],
+    }));
+    return { count: snap.docs.length, docs };
   }
 
   /** Create a new submission document. */

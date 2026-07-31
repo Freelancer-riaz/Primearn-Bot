@@ -370,13 +370,26 @@ export class SubmissionService {
     if (!category.dailyLimitEnabled) return;
 
     const today = this.todayUTC(); // "YYYY-MM-DD" UTC — matches the submitDate field
-    const count = await this.repo.countNormalSubmissionsOnDate(
+    const result = await this.repo.countNormalSubmissionsOnDate(
       telegramId,
       category.id,
       today,
     );
 
-    if (count >= category.dailySubmitCount) {
+    logger.info("[DEBUG DAILY LIMIT] Input", {
+      telegramId,
+      categoryId: category.id,
+      todayDate: today,
+      configuredDailyLimit: category.dailySubmitCount,
+    });
+    logger.info("[DEBUG DAILY LIMIT] Query result", {
+      finalCount: result.count,
+      submissionIds: result.docs.map((d) => d.id),
+      submitDateValues: result.docs.map((d) => d.submitDate),
+      submissionTypes: result.docs.map((d) => d.submissionType),
+    });
+
+    if (result.count >= category.dailySubmitCount) {
       throw new ValidationError(
         "━━━━━━━━━━━━━━━━━━━━━\n" +
           "⚠️  Daily Upload Limit Reached\n" +
