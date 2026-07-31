@@ -369,17 +369,20 @@ export class SubmissionService {
   ): Promise<void> {
     if (!category.dailyLimitEnabled) return;
 
-    const { start, end } = this.dhakaDayBoundsUTC();
-    const count = await this.repo.countCreatedSubmissionsToday(
+    const today = this.todayUTC(); // "YYYY-MM-DD" UTC — matches the submitDate field
+    const count = await this.repo.countNormalSubmissionsOnDate(
       telegramId,
       category.id,
-      start,
-      end,
+      today,
     );
 
     if (count >= category.dailySubmitCount) {
       throw new ValidationError(
-        "Daily submission limit reached.\n\nYou have reached today's submission limit for this category.\n\nPlease try again tomorrow.",
+        "━━━━━━━━━━━━━━━━━━━━━\n" +
+          "⚠️  Daily Upload Limit Reached\n" +
+          "━━━━━━━━━━━━━━━━━━━━━\n\n" +
+          "You have already used today's upload limit for this category.\n\n" +
+          "Please try again tomorrow.",
       );
     }
   }

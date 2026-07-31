@@ -1,4 +1,5 @@
 import type { Context } from "grammy";
+import { InlineKeyboard } from "grammy";
 import type { FirebaseApp } from "../../config/firebase";
 import { ProfileService } from "../../services/ProfileService";
 import { buildProfileMessage } from "../messages/profileMessage";
@@ -56,9 +57,27 @@ export function createProfileCommand(app: FirebaseApp) {
 export function createProfileRefreshCallback(app: FirebaseApp) {
   return async (ctx: Context): Promise<void> => {
     try {
+      // Dismiss Telegram spinner immediately
       await ctx.answerCallbackQuery();
 
       if (!ctx.from) return;
+
+      // Show loading state while fetching from Firestore
+      const isPhoto =
+        ctx.callbackQuery?.message != null &&
+        "photo" in ctx.callbackQuery.message;
+      try {
+        if (isPhoto) {
+          await ctx.editMessageCaption({
+            caption: "⏳  Loading...\n\nPlease wait...",
+            reply_markup: new InlineKeyboard(),
+          });
+        } else {
+          await ctx.editMessageText("⏳  Loading...\n\nPlease wait...", {
+            reply_markup: new InlineKeyboard(),
+          });
+        }
+      } catch { /* ignore — message may not be editable */ }
 
       const profileService = new ProfileService(app);
       const profile = await profileService.getProfile(ctx.from.id);
@@ -68,8 +87,8 @@ export function createProfileRefreshCallback(app: FirebaseApp) {
       const text = buildProfileMessage(profile);
       const keyboard = buildProfileKeyboard();
 
-      // Edit caption if it's a photo message, otherwise edit text
-      if (ctx.callbackQuery?.message && "photo" in ctx.callbackQuery.message) {
+      // Replace loading with full profile content
+      if (isPhoto) {
         await ctx.editMessageCaption({
           caption: text,
           parse_mode: "HTML",

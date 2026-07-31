@@ -85,29 +85,26 @@ export class SubmissionRepository {
   }
 
   /**
-   * Count all successfully created submissions for a user + category within a
-   * UTC time window. Used for the Asia/Dhaka daily submission limit check.
+   * Count normal submissions created today (by UTC date stored in submitDate)
+   * for a specific user + category. Uses equality filters only — no composite
+   * index required beyond Firestore's automatic single-field indexes.
    *
    * A submission counts as soon as it is created in Firestore — regardless of
-   * status or reportStatus. Only records that never reached Firestore (failed
-   * validation, upload failures, cancellations) are excluded naturally.
+   * status or reportStatus. Only submissions that never reached Firestore
+   * (failed validation, upload failures, cancellations) are excluded naturally.
    *
-   * Requires composite index: (telegramId, categoryId, createdAt).
-   *
-   * @param startUTC - ISO 8601 string: start of the Dhaka day expressed in UTC (inclusive)
-   * @param endUTC   - ISO 8601 string: start of the next Dhaka day expressed in UTC (exclusive)
+   * @param date - "YYYY-MM-DD" UTC date string (matches the submitDate field)
    */
-  async countCreatedSubmissionsToday(
+  async countNormalSubmissionsOnDate(
     telegramId: number,
     categoryId: string,
-    startUTC: string,
-    endUTC: string,
+    date: string,
   ): Promise<number> {
     const snap = await this.col()
       .where("telegramId", "==", telegramId)
       .where("categoryId", "==", categoryId)
-      .where("createdAt", ">=", startUTC)
-      .where("createdAt", "<", endUTC)
+      .where("submitDate", "==", date)
+      .where("submissionType", "==", "normal")
       .get();
     return snap.docs.length;
   }
