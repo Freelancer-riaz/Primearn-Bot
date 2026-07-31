@@ -1,0 +1,212 @@
+Improve the upload experience and all upload validation messages.
+
+⚠️ IMPORTANT
+
+Do NOT change any business logic.
+
+Do NOT modify submission flow.
+
+Do NOT modify Firestore logic.
+
+Do NOT modify duplicate detection.
+
+Do NOT modify old ID detection.
+
+Only improve USER EXPERIENCE.
+
+━━━━━━━━━━━━━━━━━━━━━━
+PART 1 — Meaningful Upload Errors
+━━━━━━━━━━━━━━━━━━━━━━
+
+Rule 1
+
+If:
+
+oldIds == totalParsedIds
+
+OR
+
+validIds == 0 AND oldIds > 0
+
+DO NOT show:
+
+❌ Minimum upload limit not reached
+
+Instead show:
+
+━━━━━━━━━━━━━━━━━━━━━
+⚠️ Upload Rejected
+━━━━━━━━━━━━━━━━━━━━━
+
+All IDs in your file were already submitted.
+
+📄 File Summary
+
+• Total IDs
+• Old IDs
+• New IDs
+
+Please upload a file containing new IDs.
+
+━━━━━━━━━━━━━━━━━━━━━━
+
+Rule 2
+
+If validIds < minimumRequired
+
+Show
+
+Not enough NEW IDs.
+
+Display
+
+Total IDs
+
+Duplicate IDs
+
+Old IDs
+
+New IDs
+
+Minimum Required
+
+━━━━━━━━━━━━━━━━━━━━━━
+
+Rule 3
+
+If validIds > maximumAllowed
+
+Show
+
+Too many NEW IDs.
+
+Display
+
+Total IDs
+
+Duplicate IDs
+
+Old IDs
+
+New IDs
+
+Maximum Allowed
+
+━━━━━━━━━━━━━━━━━━━━━━
+
+Rule 4
+
+Wrong file format
+
+Show
+
+Invalid Excel File
+
+Please upload a valid .xlsx file.
+
+━━━━━━━━━━━━━━━━━━━━━━
+
+Rule 5
+
+No IDs found
+
+Show
+
+No valid IDs found in Column A.
+
+━━━━━━━━━━━━━━━━━━━━━━
+
+Never expose internal validation errors.
+
+Always explain WHY upload failed.
+
+━━━━━━━━━━━━━━━━━━━━━━
+PART 2 — Button Loading Experience
+━━━━━━━━━━━━━━━━━━━━━━
+
+Current problem:
+
+When user presses any inline button,
+
+Bot sometimes needs 3–7 seconds.
+
+During this time nothing happens.
+
+Users think the bot is frozen.
+
+Improve this.
+
+━━━━━━━━━━━━━━━━━━━━━━
+
+Immediately after pressing ANY callback button:
+
+• Category
+• Submission Type
+• Back
+• Upload
+• Report
+• Admin buttons
+
+Answer the callback immediately.
+
+Use:
+
+answerCallbackQuery()
+
+so Telegram instantly removes the loading spinner.
+
+If the next screen takes more than 1 second,
+
+show a temporary loading message.
+
+Example:
+
+━━━━━━━━━━━━━━━━━━━━━
+⏳ Loading...
+━━━━━━━━━━━━━━━━━━━━━
+
+Please wait...
+
+or
+
+Processing your request...
+
+Then automatically replace that loading message with the actual next page.
+
+Never leave the loading message on screen.
+
+━━━━━━━━━━━━━━━━━━━━━━
+
+If any exception happens,
+
+show a friendly message.
+
+Example:
+
+━━━━━━━━━━━━━━━━━━━━━
+❌ Operation Failed
+━━━━━━━━━━━━━━━━━━━━━
+
+Reason:
+
+<simple explanation>
+
+Please try again.
+
+━━━━━━━━━━━━━━━━━━━━━━
+
+Never leave user waiting with no response.
+
+Every button press must immediately give visual feedback.
+
+━━━━━━━━━━━━━━━━━━━━━━
+
+Run:
+
+pnpm typecheck
+
+Commit:
+
+Improve upload UX and button loading experience
+
+Push to GitHub.
