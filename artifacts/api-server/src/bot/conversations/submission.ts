@@ -417,15 +417,20 @@ export function createSubmissionConversation(app: FirebaseApp, env: Env) {
               if (err instanceof ValidationError) {
                 isValidationError = true;
                 processErrorMsg = err.message;
+                logger.warn("Submission validation failed", {
+                  error: processErrorMsg,
+                  telegramId,
+                  categoryId: category.id,
+                });
               } else {
                 processErrorMsg = err instanceof Error ? err.message : String(err);
+                logger.error("Submission upload failed", {
+                  error: processErrorMsg,
+                  stack,
+                  telegramId,
+                  categoryId: category.id,
+                });
               }
-              logger.error("Submission upload failed", {
-                error: processErrorMsg,
-                stack,
-                telegramId,
-                categoryId: category.id,
-              });
             }
           }
 
